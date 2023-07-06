@@ -3,8 +3,9 @@
  *
  * Note(s):
  * 1. As written this script may archive Demo tasks...
- * 2. attribute #archiveAgeInDays is maintained on the script note to override the default
- * 2. attribute #lastUpdated is maintained on the script note to verify script runs daily
+ * 2. #archiveAgeInDays is maintained on the script note to override the default
+ * 3. #lastUpdated is maintained on the script note to verify script runs daily
+ * 4. I use #run=daily to run my instance of this script daily
  */
 "use strict";
 
