@@ -9,8 +9,10 @@ trilium background JavaScript that marks any #task as #archived older then #arch
 
 ## gistMirror/gistMirror.js
 
-trilium background JavaScript that mirrors #gistUsername 's GitHub Gists to a subtree in trilium-notes anchored at #gistRoot. Use #run to schedule how often to update mirror.
+trilium background JavaScript that mirrors #gistUsername 's GitHub Gists to a subtree in trilium-notes anchored at #gistRoot.
+Use #run to schedule how often to update mirror.
 
-## updateScript/updateScript.py
+## pushToNote/pushToNote.py
 
-Future ETAPI script that will import a file's content to a trilium note where note.title matches the file's name.
+An ETAPI script that will publish a file's content to a trilium sync server where note.title matches the file's name. If the note
+cannot be found an exit code of 1 is returned.
