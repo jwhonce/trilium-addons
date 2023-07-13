@@ -14,7 +14,7 @@ Example:
 Environment variables:
     * TRILIUM_URL should be set to the URL of the Trilium Notes server. 
         If not set, the default is http://localhost:8080.
-    * TRILIUM_API_TOKEN should be set to the API token for the Trilium Notes server.
+    * TRILIUM_TOKEN should be set to the API token for the Trilium Notes server.
         If not set, the default is None.
         
 TODO: Why does the trilium UI lag showing the updated attributes?
@@ -27,7 +27,7 @@ from datetime import datetime
 from trilium_py.client import ETAPI
 
 service_url = os.environ.get("TRILIUM_URL", "http://localhost:8080")
-service_token = os.environ.get("TRILIUM_API_TOKEN", None)
+service_token = os.environ.get("TRILIUM_TOKEN", None)
 
 parser = argparse.ArgumentParser(description="Publish File to Trilium Notes")
 parser.add_argument(
