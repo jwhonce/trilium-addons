@@ -54,7 +54,11 @@ with closing(jira.connection()) as client:
     )
     jira.update(
         client.search_issues(
-            'project = RHOCPPRIO AND filter = "Node Components" AND status not in (Closed)'
+            (
+                "project = RHOCPPRIO"
+                ' AND (filter = "Node Components" OR assignee = "Jhon Honce")'
+                " AND status not in (Closed)"
+            )
         )
     )
 
