@@ -20,6 +20,7 @@ Environment variables:
 TODO: Why does the trilium UI lag showing the updated attributes?
 """
 import argparse
+from contextlib import closing
 import os
 import sys
 from datetime import datetime
@@ -49,40 +50,44 @@ parser.add_argument(
 )
 
 args = parser.parse_args(sys.argv[1:])
-trilium = ETAPI(args.url, args.token)
 
 title = os.path.basename(args.filename)
-response = trilium.search_note(f'note.title="{title}"')
-if len(response["results"]) == 0:
-    print(f"Note '{title}' not found", file=sys.stderr)
-    exit(1)
-elif len(response["results"]) > 1:
-    print(f"More than 1 matching note '{title}' found", file=sys.stderr)
-    exit(1)
-note = response["results"][0]
 
-# Determine the last time this file was uploaded
-uploadedDate = None
-for a in note["attributes"]:
-    if a["name"] == "lastUploadedDate":
-        uploadedDate = a["attributeId"]
-        break
-
-with open(args.filename, "r") as f:
-    if not trilium.update_note_content(note["noteId"], f.read()):
-        print(f"Failed to update note {title}", file=sys.stderr)
+with closing(ETAPI(args.url, args.token)) as trilium:
+    response = trilium.search_note(f'note.title="{title}"')
+    if len(response["results"]) == 0:
+        print(f"Note '{title}' not found", file=sys.stderr)
         exit(1)
+    elif len(response["results"]) > 1:
+        print(f"More than 1 matching note '{title}' found", file=sys.stderr)
+        exit(1)
+    note = response["results"][0]
 
-if uploadedDate is None:
-    response = trilium.create_attribute(
-        attributeId=None,
-        noteId=note["noteId"],
-        type="label",
-        name="lastUploadedDate",
-        value=note["utcDateModified"],
-        isInheritable=False,
-    )
-else:
-    response = trilium.patch_attribute(uploadedDate, note["utcDateModified"])
+    # Determine the last time this file was uploaded
+    uploadedDate = None
+    for a in note["attributes"]:
+        if a["name"] == "lastUploadedDate":
+            uploadedDate = a["attributeId"]
+            break
+
+    with open(args.filename, "r") as f:
+        if not trilium.update_note_content(note["noteId"], f.read()):
+            print(f"Failed to update note {title}", file=sys.stderr)
+            exit(1)
+
+    now = f'{datetime.utcnow().isoformat(sep="T", timespec="seconds")}Z'
+    if uploadedDate is None:
+        response = trilium.create_attribute(
+            attributeId=None,
+            noteId=note["noteId"],
+            type="label",
+            name="lastUploadedDate",
+            value=now,
+            isInheritable=False,
+        )
+        print(f"Created {response['name']} attribute: {now}")
+    else:
+        response = trilium.patch_attribute(uploadedDate, now)
+        print(f"Updated {response['name']} attribute: {now}")
 
 exit(0)
