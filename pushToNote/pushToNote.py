@@ -16,78 +16,104 @@ Environment variables:
         If not set, the default is http://localhost:8080.
     * TRILIUM_TOKEN should be set to the API token for the Trilium Notes server.
         If not set, the default is None.
-        
-TODO: Why does the trilium UI lag showing the updated attributes?
 """
-import argparse
-from contextlib import closing
-import os
 import sys
+from dataclasses import dataclass
 from datetime import datetime
+from pathlib import Path
+from typing import Annotated, Optional
 
-from trilium_py.client import ETAPI
+import typer
+from trilium_alchemy import Session
 
-service_url = os.environ.get("TRILIUM_URL", "http://localhost:8080")
-service_token = os.environ.get("TRILIUM_TOKEN", None)
+__version__ = "0.2.0"
 
-parser = argparse.ArgumentParser(description="Publish File to Trilium Notes")
-parser.add_argument(
-    "filename",
-    help="File to publish to Trilium Notes",
-)
-parser.add_argument(
-    "-s",
-    "--server",
-    dest="url",
-    help="Your Trilium sync server URL",
-    default=service_url,
-)
-parser.add_argument(
-    "-t",
-    "--token",
-    help="Trilium API Token",
-    default=service_token,
-)
+cli = typer.Typer(add_completion=False, context_settings={"help_option_names": ["-h", "--help"]})
 
-args = parser.parse_args(sys.argv[1:])
 
-title = os.path.basename(args.filename)
+def version_callback(value: bool):
+    """Print version and exit"""
+    if value:
+        typer.echo(f"{sys.argv[0]} v: {__version__}")
+        raise typer.Exit()
 
-with closing(ETAPI(args.url, args.token)) as trilium:
-    response = trilium.search_note(f'note.title="{title}"')
-    if len(response["results"]) == 0:
-        print(f"Note '{title}' not found", file=sys.stderr)
-        exit(1)
-    elif len(response["results"]) > 1:
-        print(f"More than 1 matching note '{title}' found", file=sys.stderr)
-        exit(1)
-    note = response["results"][0]
 
-    # Determine the last time this file was uploaded
-    uploadedDate = None
-    for a in note["attributes"]:
-        if a["name"] == "lastUploadedDate":
-            uploadedDate = a["attributeId"]
-            break
+@dataclass(frozen=True)
+class State:
+    """Record state for the application.
 
-    with open(args.filename, "r") as f:
-        if not trilium.update_note_content(note["noteId"], f.read()):
-            print(f"Failed to update note {title}", file=sys.stderr)
-            exit(1)
+    :param trilium: instance of Session
+    :param verbose: display additional columns or data
+    :param dry_run: render table rather than updating Trilium
+    """
 
-    now = f'{datetime.utcnow().isoformat(sep="T", timespec="seconds")}Z'
-    if uploadedDate is None:
-        response = trilium.create_attribute(
-            attributeId=None,
-            noteId=note["noteId"],
-            type="label",
-            name="lastUploadedDate",
-            value=now,
-            isInheritable=False,
-        )
-        print(f"Created {response['name']} attribute: {now}")
-    else:
-        response = trilium.patch_attribute(uploadedDate, now)
-        print(f"Updated {response['name']} attribute: {now}")
+    trilium: Session
+    verbose: bool = False
+    dry_run: bool = False
 
-exit(0)
+
+@cli.callback(invoke_without_command=True)
+def main(
+    ctx: typer.Context,
+    file: Annotated[
+        Path, typer.Argument(exists=True, readable=True, help="Filename to upload to Trilium Notes")
+    ],
+    url: Annotated[str, typer.Option("--service-url", envvar="TRILIUM_URL", is_eager=True)],
+    token: Annotated[str, typer.Option("--token", envvar="TRILIUM_TOKEN", is_eager=True)],
+    verbose: Annotated[
+        Optional[bool],
+        typer.Option(
+            "--verbose",
+            "-v",
+            is_eager=True,
+            help="Display additional data, defaults to False",
+        ),
+    ] = False,
+    version: Annotated[
+        Optional[bool],
+        typer.Option(
+            "--version",
+            "-V",
+            callback=version_callback,
+            is_eager=True,
+            help="Show version and exit",
+        ),
+    ] = False,
+    dry_run: Annotated[
+        Optional[bool],
+        typer.Option(
+            "--dry-run",
+            "-n",
+            is_eager=True,
+            help="Render data as table rather than updating Trilium, defaults to False",
+        ),
+    ] = False,
+) -> None:
+    """Upload named file to Trilium note of same title.
+
+    :param ctx: typer context
+    :param url: URL for Trilium service
+    :param token: Trilium API token
+    :param version: display version and exit
+    """
+    if dry_run:
+        typer.echo(f"File: {file} (URL: {url}, Token: {token})")
+        raise typer.Exit()
+
+    title = file.name
+    with Session(url, token) as trilium:
+        notes = trilium.search(f'note.title="{title}"')
+        match len(notes):
+            case 0:
+                typer.echo(f"Note '{title}' not found", err=True)
+                raise typer.Abort()
+            case 1:
+                notes[0].content = file.read_text()
+                notes[0]["lastUploadedDate"] = datetime.utcnow().isoformat()
+            case _:
+                typer.echo(f"More than 1 matching note '{title}' found", err=True)
+                raise typer.Abort()
+
+
+if __name__ == "__main__":
+    cli()
