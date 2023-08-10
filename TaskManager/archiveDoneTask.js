@@ -38,17 +38,21 @@ if (lastUpdated.isSameOrAfter(api.dayjs.utc(), "day")) {
 const archiveAge = scriptNote.getLabelValue("archivedAgeInDays") ?? "30";
 const dateToArchive = api.dayjs().subtract(archiveAge, "day");
 
-// TODO: Is there a method to anchor a search at taskDoneRoot?
 // Set 'archived' attribute on aged finished tasks
-for (const child of taskDoneRoot.getChildNotes()) {
-    if (!child.hasLabel("task")) {
-        continue;
-    }
+const agedTasks = api.searchForNotes(`#task AND #doneDate < TODAY-${archivedAgeInDays}`,
+    { ancestorNoteId: taskDoneRoot.noteId }
+);
+agedTasks.forEach(async (task) => await task.toggleLabel(true, "archived"));
 
-    const doneDate = api.dayjs(child.getLabelValue("doneDate"));
-    if (doneDate?.isAfter(dateToArchive, "day")) {
-        continue;
-    }
-    child.toggleLabel(true, "archived");
-}
+// for (const child of taskDoneRoot.getChildNotes()) {
+//     if (!child.hasLabel("task")) {
+//         continue;
+//     }
+
+//     const doneDate = api.dayjs(child.getLabelValue("doneDate"));
+//     if (doneDate?.isAfter(dateToArchive, "day")) {
+//         continue;
+//     }
+//     child.toggleLabel(true, "archived");
+// }
 scriptNote.setLabel("lastUpdated", api.dayjs.utc().format());
