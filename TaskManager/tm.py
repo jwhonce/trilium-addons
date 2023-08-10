@@ -12,7 +12,7 @@ from rich.console import Console
 from rich.table import Table
 from trilium_alchemy import Label, Note, Session
 
-__version__ = "0.1.0"
+__version__ = "0.1.1"
 
 
 cli = typer.Typer(context_settings={"help_option_names": ["-h", "--help"]})
@@ -163,14 +163,14 @@ def add(
     task: Note
     match ctx.command.name:
         case "add":
-            task = Note(title=description, template=task_template, parents=todo_root, leaf=True)
+            task = Note(title=description, template=task_template, parents=todo_root)
         case "update":
             task = session.search(f'#task note.title="{description}"', ancestor_note=todo_root)[0]
         case _:
             raise AssertionError(f"Command {ctx.command.name} not in (add, update)")
 
     if due:
-        task["todoDate"] = due.strftime("%m-%d-%Y")
+        task["todoDate"] = due.strftime("%Y-%m-%d")
 
     if location:
         task["location"] = location
