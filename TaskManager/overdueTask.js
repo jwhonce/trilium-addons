@@ -3,7 +3,8 @@
  * 
  * Note(s):
  * 1. As written this script may clone Demo tasks...
- * 2. I use #run=daily to run my instance of this script daily
+ * 2. I use `#run=hourly #runAtHour=0400 #runOnInstance=sync-server`
+ *    to run my instance of this script daily
  */
 "use strict";
 
