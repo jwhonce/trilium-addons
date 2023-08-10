@@ -12,60 +12,75 @@ Environment variables:
         If not set, the default is None.
 """
 import os
-from collections import namedtuple
 from contextlib import closing
-from datetime import datetime, timedelta
+from dataclasses import dataclass
+from datetime import datetime
+from typing import Annotated, Any, Callable, Optional
 
 import jira as Jira
-import pytz
+import typer
+from rich.console import Console
+from rich.table import Table
 from trilium_py.client import ETAPI
 
-service_url = os.environ.get("TRILIUM_URL", "http://localhost:8080")
-service_token = os.environ.get("TRILIUM_TOKEN", None)
+__version__ = "0.1.1"
 
-Service = namedtuple("Service", ["type", "options", "connection", "cache", "update"])
+
+@dataclass
+class Service:
+    type: str
+    connection: Callable[[], Any]
+    cache: list[Jira.Issue]
+    update: Callable[[list[Any]], None]
+
 
 jira = Service(
     "jira",
-    None,
     lambda: Jira.JIRA("https://issues.redhat.com", token_auth=os.environ.get("JIRA_TOKEN")),
     [],
     lambda l: jira.cache.extend(l),
 )
 
-Ticket = namedtuple("Ticket", ["key", "summary", "url", "status", "labels", "priority", "created"])
-tickets: list[Ticket] = []
 
-triage_cutoff = (datetime.utcnow() - timedelta(days=6)).replace(tzinfo=pytz.utc)
+@dataclass
+class Ticket:
+    key: str
+    summary: str
+    url: str
+    status: str
+    labels: list[str]
+    priority: str
+    created: datetime
 
-with closing(jira.connection()) as client:
-    jira.update(
-        client.search_issues(
-            (
-                r'filter = "Node Components"'
-                r" AND ((project = OCPBUGS"
-                r"  OR project = RHOCPPRIO AND issueType in (Bug, Task))"
-                r"  OR project = OCPNODE AND issueType = Bug)"
-                r" AND status = New"
-                r" AND ((labels is EMPTY OR labels not in (triaged)) OR priority in (Undefined))"
-                r" ORDER BY priority DESC, key DESC"
+
+def get_tickets() -> list[Ticket]:
+    # triage_cutoff = (datetime.utcnow() - timedelta(days=6)).replace(tzinfo=pytz.utc)
+
+    with closing(jira.connection()) as client:
+        jira.update(
+            client.search_issues(
+                "project = rhocpprio AND status not in (Closed) AND component = Node"
             )
         )
-    )
-    jira.update(
-        client.search_issues(
-            (
-                "project = RHOCPPRIO"
-                ' AND (filter = "Node Components" OR assignee = "Jhon Honce")'
-                " AND status not in (Closed)"
+
+        jira.update(
+            client.search_issues(
+                (
+                    r'filter = "Node Components"'
+                    r" AND (project = OCPBUGS OR project = OCPNODE AND issueType = Bug)"
+                    r" AND status = New"
+                    r" AND ((labels is EMPTY OR labels not in (triaged)) OR priority in (Undefined))"
+                    r" AND created < -6d"
+                    r" ORDER BY priority DESC, key DESC"
+                )
             )
         )
-    )
 
+    tickets: list[Ticket] = []
     for bug in jira.cache:
         created = datetime.fromisoformat(bug.fields.created)
-        if created >= triage_cutoff:
-            continue
+        # if created >= triage_cutoff:
+        #     continue
 
         tickets.append(
             Ticket(
@@ -78,15 +93,90 @@ with closing(jira.connection()) as client:
                 url=bug.permalink(),
             )
         )
+    tickets.sort(key=lambda x: x.created, reverse=True)
+    return tickets
 
-trilium = ETAPI(service_url, service_token)
-for ticket in tickets:
-    trilium.add_todo(
-        f'{ticket.key} [{ticket.priority}] <a href="{ticket.url}">{ticket.summary}</a>'
+
+app = typer.Typer(add_completion=False)
+
+
+def version_callback(value: bool):
+    if value:
+        typer.echo(f"tm version: {__version__}")
+        raise typer.Exit()
+
+
+@app.callback(invoke_without_command=True)
+def main(
+    ctx: typer.Context,
+    trilium_url: Annotated[str, typer.Option("--service-url", envvar="TRILIUM_URL", is_eager=True)],
+    token: Annotated[str, typer.Option("--token", envvar="TRILIUM_TOKEN", is_eager=True)],
+    verbose: Annotated[Optional[bool], typer.Option("--verbose", "-v", is_eager=True)] = False,
+    version: Annotated[
+        Optional[bool],
+        typer.Option(
+            "--version",
+            callback=version_callback,
+            is_eager=True,
+            help="Show version and exit.",
+        ),
+    ] = False,
+    dry_run: Annotated[
+        Optional[bool],
+        typer.Option(
+            "--dry-run",
+            "-n",
+            is_eager=True,
+            help="Render Tasks as table rather than updating Trilium.",
+        ),
+    ] = False,
+) -> None:
+    client = ETAPI(trilium_url, token)
+    ctx.with_resource(closing(client))
+
+    title = "Tasks"
+    review_bugs = "Review untriaged Node Bugs"
+    if dry_run:
+        render_table(title, review_bugs, get_tickets())
+    else:
+        update_trilium(client, title, review_bugs, get_tickets())
+
+
+def render_table(title: str, static: str, tickets: list[Ticket]) -> None:
+    """Render a table of tickets to stdout."""
+    table = Table(
+        "Key",
+        "Priority",
+        "Status",
+        "Summary",
+        box=None,
+        header_style="underline2",
+        title=title,
     )
-permalink = (
-    r"https://issues.redhat.com/secure/Dashboard.jspa"
-    r"?selectPageId=12345608"
-    r"#SIGwKWmOqDAaNglROUEImIOqGjtpUxw8HF6BFOqSXIGgGAKIiiKmgQJB+jQlQMJUhQwQgYEeF1QlAA"
-)
-trilium.add_todo(f'<a href="{permalink}">Untriaged Node Bugs</a>')
+    table.add_row("-", "-", "-", static)
+
+    for ticket in tickets:
+        table.add_row(ticket.key, ticket.priority, ticket.status, ticket.summary)
+
+    with Console() as console:
+        console.print(table)
+
+
+def update_trilium(client: ETAPI, title: str, static: str, tickets: list[Ticket]) -> None:
+    """Update Trilium with Jira tickets as Task list."""
+    permalink = (
+        r"https://issues.redhat.com/secure/Dashboard.jspa"
+        r"?selectPageId=12345608"
+        r"#SIGwKWmOqDAaNglROUEImIOqGjtpUxw8HF6BFOqSXIGgGAKIiiKmgQJB+jQlQMJUhQwQgYEeF1QlAA"
+    )
+    client.add_todo(f'<a href="{permalink}">{static}</a>', todo_caption=f"<h3>{title}</h3>")
+
+    for ticket in tickets:
+        client.add_todo(
+            f"{ticket.key}: {ticket.priority} - {ticket.status}<br>"
+            f'<a href="{ticket.url}">{ticket.summary}</a>'
+        )
+
+
+if __name__ == "__main__":
+    app()
