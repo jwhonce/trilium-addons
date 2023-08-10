@@ -7,18 +7,20 @@
  */
 "use strict";
 
+const scriptNote = api.currentNote;
+
 const now = new Date();
 const dayOfWeek = now.getDay();
 
 // Skip weekends
 if (dayOfWeek === 0 || dayOfWeek === 6) {
-    api.log("Info: Skipping weekend");
+    api.log(`${scriptNote.title}: Info: Skip weekend`);
     return;
 }
 
 const taskTodoRoot = api.getNoteWithLabel("taskTodoRoot");
 if (!taskTodoRoot?.hasChildren()) {
-    api.log("Info: No existing tasks found");
+    api.log(`${scriptNote.title}: Info: No tasks found`);
     return;
 }
 
