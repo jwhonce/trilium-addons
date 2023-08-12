@@ -28,6 +28,7 @@ if (!taskDoneRoot?.hasChildren()) {
 
 let lastUpdated = api.dayjs.utc(scriptNote.getLabelValue("lastUpdated"));
 if (!lastUpdated.isValid()) {
+    // Need to start sometime...
     lastUpdated = api.dayjs.utc("1970-01-01T00:00:00Z");
 }
 if (lastUpdated.isSameOrAfter(api.dayjs.utc(), "day")) {
@@ -36,12 +37,10 @@ if (lastUpdated.isSameOrAfter(api.dayjs.utc(), "day")) {
 }
 
 const archiveAge = scriptNote.getLabelValue("archivedAgeInDays") ?? "30";
-const dateToArchive = api.dayjs().subtract(archiveAge, "day");
-
-// Set 'archived' attribute on aged finished tasks
-const agedTasks = api.searchForNotes(`#task AND #doneDate < TODAY-${archivedAgeInDays}`,
+const agedTasks = api.searchForNotes(`#task AND #doneDate < TODAY-${archiveAge}`,
     { ancestorNoteId: taskDoneRoot.noteId }
 );
 agedTasks.forEach(async (task) => await task.toggleLabel(true, "archived"));
 
 scriptNote.setLabel("lastUpdated", api.dayjs.utc().format());
+
