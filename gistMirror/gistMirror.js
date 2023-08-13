@@ -54,10 +54,11 @@ fetch(`https://api.github.com/users/${gistUsername}/gists`, {
     })
     .then((gists) => {
         for (const gist of gists) {
-            // TODO: Search should be anchored at #gistRoot
-            const note = api.searchForNote(`note.title="${gist.description}"`);
+            const note = api.searchForNote(`note.title="${gist.description}"`,
+                { ancestorNoteId: gistRootNote.noteId }
+            );
             if (note) {
-                updateNote(note, gist);
+                updateNote(gistRootNote, note, gist);
             } else {
                 newNote(gistRootNote, gist);
             }
@@ -69,6 +70,10 @@ fetch(`https://api.github.com/users/${gistUsername}/gists`, {
     .catch((err) => {
         api.log(`Error: Failed fetching gists, ${err}`);
     });
+
+const scriptNote = api.currentNote;
+scriptNote.setLabel("lastUpdated", api.dayjs.utc().format());
+
 
 /**
  * Add given gist to existing root note including attached files
@@ -129,10 +134,11 @@ function newNote(parent, gist) {
 /**
  * Update existing note with latest gist data, new notes created if needed
  *
+ * @param {BNote} root Trilium gistRoot note
  * @param {BNote} note Trilium note to update
  * @param {Object} gist GitHub Gist object holding updated data
  */
-function updateNote(note, gist) {
+function updateNote(root, note, gist) {
     let lastUpdated = api.dayjs.utc(note.getLabelValue("lastUpdated"));
     if (!lastUpdated.isValid()) {
         lastUpdated = api.dayjs.utc("1970-01-01T00:00:00Z");
@@ -141,8 +147,9 @@ function updateNote(note, gist) {
 
     if (gistUpdatedAt.isAfter(lastUpdated)) {
         for (const file of Object.values(gist.files)) {
-            // TODO: search should be anchored at note
-            const childNote = api.searchForNote(`note.title="${file.filename}"`);
+            const childNote = api.searchForNote(`note.title="${file.filename}"`,
+                { ancestorNoteId: root.noteId }
+            );
 
             fetch(file.raw_url, {
                 headers: {
