@@ -6,6 +6,7 @@ Note:
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Annotated, Optional
+import click
 
 import typer
 from rich.console import Console
@@ -41,6 +42,14 @@ def complete_description(ctx: typer.Context, incomplete: str) -> list[str]:
 Description = Annotated[
     str, typer.Argument(help="Description of task item", autocompletion=complete_description)
 ]
+
+
+# https://typer.tiangolo.com/tutorial/parameter-types/custom-types/
+class TaskNote(Note, click.ParamType):
+    name = "Note"
+
+    def convert(self, value, param, ctx) -> Note:
+        return super().search(f'#task note.title="{value}"', ancestor_note=ctx.obj.root)[0]
 
 
 @dataclass(frozen=True)
@@ -110,7 +119,7 @@ def main(
     ctx.with_resource(client)
 
     todo_root = client.search("#taskTodoRoot")
-    if todo_root is None:
+    if len(todo_root) != 1:
         typer.echo("taskTodoRoot not found", err=True)
         raise typer.Abort()
 
