@@ -7,6 +7,7 @@ Note(s):
     * The labels, relations and widgets of TaskManager are leveraged to manage tasks
 """
 import os
+import sys
 from dataclasses import dataclass
 from datetime import datetime
 from functools import cache
@@ -19,6 +20,10 @@ from trilium_alchemy import Label, Note, Session
 
 __version__ = "0.1.2"
 
+if sys.version_info < (3, 10):
+    # minimum version for trilium-alchemy
+    typer.echo("Python 3.10 or higher is required.", err=True)
+    sys.exit(1)
 
 cli = typer.Typer(
     rich_markup_mode="markdown",
@@ -115,6 +120,7 @@ def main(
 
     * **#taskDoneRoot** is the root for Done Tasks.
     """
+
     ctx.obj = State(verbose=verbose, dry_run=dry_run)
 
 
@@ -196,15 +202,14 @@ def list(ctx: typer.Context) -> None:
         table.add_column("Tag(s)")
 
     session: Session = open_session(ctx)
-    todo_root = session.search("#taskTodoRoot")[0]
+    todo_root: Note = session.search("#taskTodoRoot")[0]
     for task in todo_root.children:
         row = []
-
-        row.append("N/A" if "todoDate" not in task else task["todoDate"])
+        row.append(task.get("todoDate", "N/A"))
         row.append(task.title)
 
         if ctx.obj.verbose:
-            row.append("N/A" if "location" not in task else task["location"])
+            row.append(task.get("location", "N/A"))
 
             tags: str = "N/A"
             if "tag" in task.attributes and len(task.attributes["tag"]) > 0:

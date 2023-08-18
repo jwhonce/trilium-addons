@@ -15,9 +15,9 @@ from dataclasses import dataclass
 from datetime import datetime
 from itertools import chain
 from string import Template
-from typing import Annotated
+from typing import Annotated, Optional
 
-import jira as Jira
+import jira as jira
 import typer
 from bs4 import BeautifulSoup
 from jira.client import ResultList
@@ -27,9 +27,17 @@ from trilium_alchemy import Label, Note, Session
 
 __version__ = "0.2.0"
 
+if sys.version_info < (3, 10):
+    # minimum version for trilium-alchemy
+    typer.echo("Python 3.10 or higher is required.", err=True)
+    sys.exit(1)
+
 logging.basicConfig(level=logging.WARN)
 
-cli = typer.Typer(context_settings={"help_option_names": ["-h", "--help"]})
+cli = typer.Typer(
+    rich_markup_mode="markdown",
+    context_settings={"help_option_names": ["--help", "-h"], "allow_interspersed_args": True},
+)
 
 
 @dataclass
@@ -64,7 +72,7 @@ class State:
 def version_callback(value: bool):
     """Print version and exit"""
     if value:
-        typer.echo(f"tm version: {__version__}")
+        typer.echo(f"jira_sla v: {__version__}")
         raise typer.Exit()
 
 
@@ -83,35 +91,33 @@ def main(
         bool,
         typer.Option(
             "--verbose",
-            "-v",
-            help="Display additional columns, defaults to False",
+            "-V",
+            help="Display additional columns, defaults to False.",
         ),
     ] = False,
     version: Annotated[
-        bool,
+        Optional[bool],
         typer.Option(
             "--version",
-            "-V",
+            "-v",
             callback=version_callback,
-            is_flag=True,
             is_eager=True,
-            help="Show version and exit",
+            help="Show version and exit.",
         ),
-    ] = False,
+    ] = None,
     dry_run: Annotated[
         bool,
         typer.Option(
             "--dry-run",
             "-n",
-            help="Render Tasks as table rather than updating Trilium, defaults to False",
+            help="Render Tasks as table rather than updating Trilium, defaults to False.",
         ),
     ] = False,
 ) -> None:
-    """Initialize application."""
-    if sys.version_info < (3, 10):
-        # minimum version for trilium-alchemy
-        typer.echo("Python 3.10 or higher is required.", err=True)
-        raise typer.Abort()
+    """Query Jira and update / create tasks to track important tickets.
+
+    * **#taskTodoRoot** is the root of Due Tasks.
+    """
 
     trilium = Session(trilium_url, trilium_token)
     ctx.with_resource(trilium)
@@ -130,8 +136,9 @@ def main(
     )
 
 
-@cli.command(name="list")
-def ls(ctx: typer.Context) -> None:
+@cli.command(name="ls")
+def list(ctx: typer.Context) -> None:
+    """List Jira tickets that need to be triaged / escalated."""
     tickets = get_tickets(ctx)
 
     table = Table(
@@ -162,7 +169,7 @@ def ls(ctx: typer.Context) -> None:
 
 @cli.command()
 def publish(ctx: typer.Context) -> None:
-    """Publish tasks to Trilium."""
+    """Publish Jira tickets to Tasks in Trilium."""
 
     html_template = Template(
         '<h2><a href="$url">$key</a></h2>'
@@ -191,7 +198,7 @@ def publish(ctx: typer.Context) -> None:
         )
         match len(candidate):
             case 0:
-                logging.debug(f"New issue: {ticket.key}")
+                logging.debug(f"New Jira issue: {ticket.key}")
 
                 task = Note(
                     title=f"{ticket.key}: {ticket.title}",
@@ -219,7 +226,7 @@ def publish(ctx: typer.Context) -> None:
                 task ^= (today, "TODO")
 
             case 1:
-                logging.debug(f"Updating issue: {ticket.key}")
+                logging.debug(f"Updating Task with Jira issue: {ticket.key}")
                 task = candidate[0]
 
                 soup = BeautifulSoup(str(task.content).encode("ascii", "ignore"), "html.parser")
@@ -248,10 +255,10 @@ def publish(ctx: typer.Context) -> None:
                     del soup
 
             case _:
-                typer.echo(f"Multiple matches for {ticket.key}", err=True)
+                typer.echo(f"Multiple Tasks matched for {ticket.key}", err=True)
                 raise typer.Abort()
 
-        # Update task metadata whether new or existing
+        # Update Task metadata whether new or existing
         task["jiraAssignee"] = ticket.assignee or "N/A"
         task["jiraPriority"] = ticket.priority
         task["jiraStatus"] = ticket.status
@@ -308,10 +315,8 @@ def get_tickets(ctx: typer.Context) -> list[Ticket]:
     )
 
     def new_ticket(bug: Jira.Issue) -> Ticket:
-        # Map Jira fields to Ticket fields
+        """Map Jira fields to Ticket fields, formatting as needed."""
         assignee = bug.fields.assignee.displayName if bug.fields.assignee else None
-        # title = ticket.summary[:45] + "..." * (len(ticket.summary) > 45)
-        # title=textwrap.shorten(bug.fields.summary, width=45, placeholder="..."),
 
         return Ticket(
             assignee=assignee,
