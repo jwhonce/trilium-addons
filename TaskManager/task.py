@@ -20,12 +20,12 @@ from rich.console import Console
 from rich.table import Table
 from trilium_alchemy import Label, Note, Session
 
-__version__ = "0.1.3"
-
 if sys.version_info < (3, 10):
     # minimum version for trilium-alchemy
     typer.echo("Python 3.10 or higher is required.", err=True)
     sys.exit(1)
+
+__version__ = "0.1.3"
 
 cli = typer.Typer(
     rich_markup_mode="markdown",
@@ -33,7 +33,19 @@ cli = typer.Typer(
 )
 
 
-def version_callback(value: bool):
+@dataclass(frozen=True)
+class State:
+    """Record state of application.
+
+    :param verbose: display additional columns or data
+    :param dry_run: render table rather than updating Trilium
+    """
+
+    verbose: bool
+    dry_run: bool
+
+
+def _version(value: bool):
     """Print version and exit."""
     if value:
         typer.echo(f"task v: {__version__}")
@@ -47,29 +59,25 @@ def _open_session(ctx: typer.Context) -> Session:
     return session
 
 
-def _complete_description(ctx: typer.Context, incomplete: str) -> Generator[str, None, None]:
+def _complete_description(
+    ctx: typer.Context, incomplete: str
+) -> Generator[str, None, None]:
     session: Session = _open_session(ctx)
 
-    # Build query string based on command
-    query = "#task"
+    include_archived_notes = ctx.command.name in ("delete", "rm")
 
-    if ctx.command.name not in ("archive", "delete", "rm"):
-        query += " #!doneDate"
+    fields: list[str] = ["#task"]
+    if ctx.command.name == "done":
+        fields.append("#!doneDate")
 
     if incomplete:
-        query += f' note.title =* "{incomplete}"'
+        fields.append(f'note.title =* "{incomplete}"')
 
-    for task in session.search(query):
+    query = " ".join(fields)
+    for task in session.search(
+        query, include_archived_notes=include_archived_notes
+    ):
         yield task.title
-
-
-# list[str] used as type to allow input with or without quotes
-Description = Annotated[
-    list[str],
-    typer.Argument(
-        autocompletion=_complete_description, show_default=False, help="Description of Task."
-    ),
-]
 
 
 class BadDescription(typer.BadParameter):
@@ -90,16 +98,15 @@ class BadDescription(typer.BadParameter):
         )
 
 
-@dataclass(frozen=True)
-class State:
-    """Record state of application.
-
-    :param verbose: display additional columns or data
-    :param dry_run: render table rather than updating Trilium
-    """
-
-    verbose: bool
-    dry_run: bool
+# list[str] used as type to allow input with or without quotes
+Description = Annotated[
+    list[str],
+    typer.Argument(
+        autocompletion=_complete_description,
+        show_default=False,
+        help="Description of Task.",
+    ),
+]
 
 
 @cli.callback()
@@ -125,7 +132,7 @@ def main(
         Optional[bool],
         typer.Option(
             "--version",
-            callback=version_callback,
+            callback=_version,
             is_eager=True,
             help="Show version and exit.",
         ),
@@ -202,11 +209,15 @@ def add(
             task = Note(title=title, template=task_template, parents=todo_root)
         case "update":
             try:
-                task = session.search(f'#task note.title="{title}"', ancestor_note=todo_root)[0]
+                task = session.search(
+                    f'#task note.title="{title}"', ancestor_note=todo_root
+                )[0]
             except IndexError as exc:
                 raise BadDescription(description, ctx=ctx) from exc
         case _:
-            raise AssertionError(f"Command {ctx.command.name} not in (add, update)")
+            raise AssertionError(
+                f"Command {ctx.command.name} not in (add, update)"
+            )
 
     if due:
         task["todoDate"] = due.strftime("%Y-%m-%d")
@@ -241,7 +252,9 @@ def ls(ctx: typer.Context) -> None:  # pylint: disable=invalid-name
 
     session: Session = _open_session(ctx)
     todo_root: Note = session.search("#taskTodoRoot")[0]
-    tasks = sorted(todo_root.children, key=lambda t: t.get("todoDate", "9999-99-99"))
+    tasks = sorted(
+        todo_root.children, key=lambda t: t.get("todoDate", "9999-99-99")
+    )
     for task in tasks:
         row = []
         row.append(task.get("todoDate", "-"))
@@ -289,7 +302,9 @@ def delete(
         raise typer.Exit()
 
     try:
-        task = session.search(f'#task note.title="{title}"', include_archived_notes=True)[0]
+        task = session.search(
+            f'#task note.title="{title}"', include_archived_notes=True
+        )[0]
         task.delete()
     except IndexError as exc:
         raise BadDescription(description, ctx=ctx) from exc
