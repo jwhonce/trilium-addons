@@ -13,8 +13,7 @@ import sys
 from dataclasses import dataclass
 from datetime import datetime
 from functools import cache
-from typing import Annotated, Any, Generator, List, Optional
-import click
+from typing import Annotated, Generator, List, Optional
 
 import typer
 from rich.console import Console
@@ -145,7 +144,7 @@ def main(
 
     * **#taskDoneRoot** is the root for Done Tasks.
     """
-
+    _ = version
     ctx.obj = State(verbose=verbose, dry_run=dry_run)
 
 
@@ -239,9 +238,9 @@ def add(
     todo_root += task
 
 
-@cli.command(name="ls")
+@cli.command(name="list")
 @cli.command()
-def list(ctx: typer.Context) -> None:
+def ls(ctx: typer.Context) -> None:
     """List due Tasks."""
 
     table = Table(title="Tasks", box=None, header_style="underline2")
@@ -316,12 +315,10 @@ def delete(
 def done(
     ctx: typer.Context,
     description: Description,
-    done: Annotated[
+    completed: Annotated[
         Optional[datetime],
         typer.Option(
-            "--completed",
-            formats=["%Y-%m-%d"],
-            help="Date task was completed, defaults to today.",
+            "--completed", formats=["%Y-%m-%d"], help="Date task was completed, defaults to today."
         ),
     ] = None,
 ) -> None:
