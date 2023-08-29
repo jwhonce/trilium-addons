@@ -11,7 +11,7 @@ import sys
 from dataclasses import dataclass
 from datetime import datetime
 from functools import cache
-from typing import Annotated, Generator, Optional
+from typing import Annotated, Generator, Optional, List
 
 import typer
 from rich.console import Console
@@ -27,7 +27,9 @@ if sys.version_info < (3, 10):
 
 cli = typer.Typer(
     rich_markup_mode="markdown",
-    context_settings={"help_option_names": ["--help", "-h"], "allow_interspersed_args": True},
+    context_settings={
+        "help_option_names": ["--help", "-h"],
+    },
 )
 
 
@@ -137,7 +139,7 @@ def add(
         Optional[str], typer.Option("--location", help="Location field for Task, defaults to None.")
     ] = None,
     tags: Annotated[
-        Optional[list[str]],
+        Optional[List[str]],
         typer.Option(
             "--tag", "-t", help="Tag field(s) for Task, repeat as needed, defaults to None."
         ),
@@ -203,7 +205,8 @@ def list(ctx: typer.Context) -> None:
 
     session: Session = open_session(ctx)
     todo_root: Note = session.search("#taskTodoRoot")[0]
-    for task in todo_root.children:
+    tasks = sorted(todo_root.children, key=lambda t: t.get("todoDate", "9999-99-99"))
+    for task in tasks:
         row = []
         row.append(task.get("todoDate", "N/A"))
         row.append(task.title)
