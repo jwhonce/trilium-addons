@@ -13,7 +13,7 @@ import sys
 from dataclasses import dataclass
 from datetime import datetime
 from functools import cache
-from typing import Annotated, Generator, List, Optional
+from typing import Annotated, Any, Generator, Optional
 
 import typer
 from rich.console import Console
@@ -41,22 +41,14 @@ def version_callback(value: bool):
 
 
 @cache
-def open_session(ctx: typer.Context) -> Session:
+def _open_session(ctx: typer.Context) -> Session:
     session = Session(os.environ["TRILIUM_URL"], os.environ["TRILIUM_TOKEN"])
     ctx.with_resource(session)
     return session
 
 
-def complete_description(
-    ctx: typer.Context, incomplete: str
-) -> Generator[str, None, None]:
-    """Helper for autocompletion of description.
-
-    :param ctx: typer context
-    :param incomplete: partial description
-    :return: list of matching descriptions
-    """
-    session: Session = open_session(ctx)
+def _complete_description(ctx: typer.Context, incomplete: str) -> Generator[str, None, None]:
+    session: Session = _open_session(ctx)
 
     # Build query string based on command
     query = "#task"
@@ -71,16 +63,17 @@ def complete_description(
         yield task.title
 
 
+# list[str] used as type to allow input with or without quotes
 Description = Annotated[
-    List[str],
+    list[str],
     typer.Argument(
-        autocompletion=complete_description, help="Description of Task."
+        autocompletion=_complete_description, show_default=False, help="Description of Task."
     ),
 ]
 
 
 class BadDescription(typer.BadParameter):
-    """Raised when description is not found."""
+    """Raised when description does not match any note titles in trilium."""
 
     def __init__(
         self,
@@ -158,21 +151,19 @@ def add(
         typer.Option(
             "--due",
             formats=["%Y-%m-%d"],
-            help="Date Task is due, defaults to None.",
+            help="Date Task is due.",
         ),
     ] = None,
     location: Annotated[
         Optional[str],
-        typer.Option(
-            "--location", help="Location field for Task, defaults to None."
-        ),
+        typer.Option("--location", help="Location field for Task."),
     ] = None,
     tags: Annotated[
-        Optional[List[str]],
+        Optional[list[str]],
         typer.Option(
             "--tag",
             "-t",
-            help="Tag field(s) for Task, repeat as needed, defaults to None.",
+            help="Tag field(s) for Task, repeat as needed.",
         ),
     ] = None,
     message: Annotated[
@@ -180,11 +171,12 @@ def add(
         typer.Option(
             "--message",
             "-m",
-            help="Optional content for Task, defaults to None.",
+            help="Content for Task.",
         ),
     ] = None,
     content: Annotated[
-        Optional[typer.FileText], typer.Option(encoding="utf-8")
+        Optional[typer.FileText],
+        typer.Option(encoding="utf-8", help="Content for Task read from file."),
     ] = None,
 ) -> None:
     """Add Task to TaskManager."""
@@ -192,7 +184,7 @@ def add(
     if message and content:
         raise typer.BadParameter("Cannot specify both --message and --content")
 
-    session: Session = open_session(ctx)
+    session: Session = _open_session(ctx)
     task_template = session.search('#task note.title="task template"')[0]
     todo_root = session.search("#taskTodoRoot")[0]
     title = " ".join(description)
@@ -210,15 +202,11 @@ def add(
             task = Note(title=title, template=task_template, parents=todo_root)
         case "update":
             try:
-                task = session.search(
-                    f'#task note.title="{title}"', ancestor_note=todo_root
-                )[0]
-            except IndexError:
-                raise BadDescription(description, ctx=ctx)
+                task = session.search(f'#task note.title="{title}"', ancestor_note=todo_root)[0]
+            except IndexError as exc:
+                raise BadDescription(description, ctx=ctx) from exc
         case _:
-            raise AssertionError(
-                f"Command {ctx.command.name} not in (add, update)"
-            )
+            raise AssertionError(f"Command {ctx.command.name} not in (add, update)")
 
     if due:
         task["todoDate"] = due.strftime("%Y-%m-%d")
@@ -240,7 +228,7 @@ def add(
 
 @cli.command(name="list")
 @cli.command()
-def ls(ctx: typer.Context) -> None:
+def ls(ctx: typer.Context) -> None:  # pylint: disable=invalid-name
     """List due Tasks."""
 
     table = Table(title="Tasks", box=None, header_style="underline2")
@@ -251,11 +239,9 @@ def ls(ctx: typer.Context) -> None:
         table.add_column("Location")
         table.add_column("Tag(s)")
 
-    session: Session = open_session(ctx)
+    session: Session = _open_session(ctx)
     todo_root: Note = session.search("#taskTodoRoot")[0]
-    tasks = sorted(
-        todo_root.children, key=lambda t: t.get("todoDate", "9999-99-99")
-    )
+    tasks = sorted(todo_root.children, key=lambda t: t.get("todoDate", "9999-99-99"))
     for task in tasks:
         row = []
         row.append(task.get("todoDate", "-"))
@@ -286,7 +272,7 @@ def delete(
         typer.Option(
             "--force",
             prompt="Confirm delete?",
-            help="Force delete.",
+            help="Skip confirming delete.",
         ),
     ] = False,
 ) -> None:
@@ -295,7 +281,7 @@ def delete(
     if not force:
         raise typer.Abort()
 
-    session: Session = open_session(ctx)
+    session: Session = _open_session(ctx)
     title = " ".join(description)
 
     if ctx.obj.dry_run:
@@ -303,12 +289,10 @@ def delete(
         raise typer.Exit()
 
     try:
-        task = session.search(
-            f'#task note.title="{title}"', include_archived_notes=True
-        )[0]
+        task = session.search(f'#task note.title="{title}"', include_archived_notes=True)[0]
         task.delete()
-    except IndexError:
-        raise BadDescription(description, ctx=ctx)
+    except IndexError as exc:
+        raise BadDescription(description, ctx=ctx) from exc
 
 
 @cli.command()
@@ -318,34 +302,36 @@ def done(
     completed: Annotated[
         Optional[datetime],
         typer.Option(
-            "--completed", formats=["%Y-%m-%d"], help="Date task was completed, defaults to today."
+            "--completed",
+            formats=["%Y-%m-%d"],
+            default_factory=datetime.now,
+            help="Date task was completed, defaults to today.",
         ),
-    ] = None,
+    ],
 ) -> None:
     """Mark Task as done."""
 
     # Note: All the heavy lifting is done by the JavaScript Implementation of TaskManager.
-    session: Session = open_session(ctx)
+    session: Session = _open_session(ctx)
     title = " ".join(description)
-    now = (done or datetime.now()).strftime("%Y-%m-%d")
 
     if ctx.obj.dry_run:
-        typer.echo(f'#doneDate={now} #cssClass=done note.title="{title}"')
+        typer.echo(f'#doneDate={completed} #cssClass=done note.title="{title}"')
         raise typer.Exit()
 
     try:
         task = session.search(f'#task note.title="{title}"')[0]
-        task["doneDate"] = now
+        task["doneDate"] = completed.strftime("%Y-%m-%d")
         task["cssClass"] = "done"
-    except IndexError:
-        raise BadDescription(description, ctx=ctx)
+    except IndexError as exc:
+        raise BadDescription(description, ctx=ctx) from exc
 
 
 @cli.command()
 def archive(ctx: typer.Context, description: Description) -> None:
     """Archive Task."""
 
-    session: Session = open_session(ctx)
+    session: Session = _open_session(ctx)
     title = " ".join(description)
 
     if ctx.obj.dry_run:
@@ -355,8 +341,8 @@ def archive(ctx: typer.Context, description: Description) -> None:
     try:
         task = session.search(f'#task note.title="{title}"')[0]
         task["archived"] = ""
-    except IndexError:
-        raise BadDescription(description, ctx=ctx)
+    except IndexError as exc:
+        raise BadDescription(description, ctx=ctx) from exc
 
 
 if __name__ == "__main__":
