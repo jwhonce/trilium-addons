@@ -15,9 +15,9 @@ from dataclasses import dataclass
 from datetime import datetime
 from itertools import chain
 from string import Template
-from typing import Annotated, Optional
+from typing import Annotated, List, Optional
 
-import jira as jira
+import jira as Jira
 import typer
 from bs4 import BeautifulSoup
 from jira.client import ResultList
@@ -47,7 +47,7 @@ class Ticket:
     title: str
     url: str
     status: str
-    labels: list[str]
+    labels: List[str]
     priority: str
     created: datetime
     updated: datetime
@@ -137,6 +137,7 @@ def main(
 
 
 @cli.command(name="ls")
+@cli.command()
 def list(ctx: typer.Context) -> None:
     """List Jira tickets that need to be triaged / escalated."""
     tickets = get_tickets(ctx)
@@ -165,11 +166,19 @@ def list(ctx: typer.Context) -> None:
 
     with Console() as console:
         console.print(table)
+    raise typer.Exit()
 
 
 @cli.command()
 def publish(ctx: typer.Context) -> None:
     """Publish Jira tickets to Tasks in Trilium."""
+
+    table = Table(
+        "Key", "Priority", "Status", "Title", box=None, header_style="underline2", title="Tasks"
+    )
+    table.add_column("Labels")
+    table.add_column("Assignee")
+    table.add_column("Created")
 
     html_template = Template(
         '<h2><a href="$url">$key</a></h2>'
@@ -219,10 +228,11 @@ def publish(ctx: typer.Context) -> None:
                 task["iconClass"] = "bx bx-bug"
                 task["jiraKey"] = ticket.key
                 task["location"] = "work"
-                task["todoDate"] = datetime.now().strftime("%Y-%m-%d")
+                task["todoDate"] = ticket.created.strftime("%Y-%m-%d")
                 task += [Label("tag", "jira")]
 
                 task_root += task
+                trilium.flush()
                 task ^= (today, "TODO")
 
             case 1:
@@ -234,19 +244,15 @@ def publish(ctx: typer.Context) -> None:
                     # Add dated marker to comment section
                     li = soup.new_tag("li")
                     li.string = f'{datetime.now().strftime("%Y-%m-%d %H:%M")} Update from Jira'
-                    empty = soup.new_tag("li")
-                    empty.string = ""
 
                     try:
                         # Append sync marker to existing comment section
                         ul = soup.find("ul", {"class": "notes-list"})
                         ul.append(li)
-                        ul.append(empty)
                     except AttributeError:
                         # Create new comment section, append at end of note
                         ul = soup.new_tag("ul", attrs={"class": "notes-list"})
                         ul.append(li)
-                        ul.append(empty)
                         soup.append(ul)
 
                     task.content = str(soup)
@@ -263,12 +269,26 @@ def publish(ctx: typer.Context) -> None:
         task["jiraPriority"] = ticket.priority
         task["jiraStatus"] = ticket.status
         task["jiraUpdated"] = ticket.updated.strftime("%Y-%m-%d")
-        task += [Label("jiraLabels", ":".join(sorted(ticket.labels)))]
+        task["jiraLabels"] = ":".join(sorted(ticket.labels))
 
         trilium.flush()
 
+        table.add_row(
+            ticket.key,
+            ticket.priority,
+            ticket.status,
+            ticket.title,
+            "\n".join(ticket.labels),
+            ticket.assignee or "N/A",
+            ticket.created.strftime("%Y-%m-%d"),
+        )
 
-def get_tickets(ctx: typer.Context) -> list[Ticket]:
+    with Console() as console:
+        console.print(table)
+    raise typer.Exit()
+
+
+def get_tickets(ctx: typer.Context) -> List[Ticket]:
     if ctx.obj.dry_run:
         """Dry run, return a single known test ticket."""
         summary = (
@@ -301,7 +321,8 @@ def get_tickets(ctx: typer.Context) -> list[Ticket]:
     issues: ResultList[Jira.Issue] = ResultList(
         chain(
             jira.search_issues(
-                r"project = rhocpprio AND status not in (Closed) AND component = Node"
+                r"project = rhocpprio AND status not in (Closed)"
+                ' AND (component = Node OR assignee = "Jhon Honce")'
             ),
             jira.search_issues(
                 r'filter = "Node Components"'
@@ -331,7 +352,10 @@ def get_tickets(ctx: typer.Context) -> list[Ticket]:
             url=bug.permalink(),
         )
 
-    return list(map(new_ticket, issues))
+    tickets: List[Ticket] = []
+    for issue in issues:
+        tickets.append(new_ticket(issue))
+    return tickets
 
 
 if __name__ == "__main__":
