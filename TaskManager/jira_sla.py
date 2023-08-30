@@ -164,10 +164,9 @@ def ls(ctx: typer.Context) -> None:  # pylint: disable=invalid-name
         title="Tasks",
     )
     if ctx.obj.verbose:
-        map(table.add_column, ["Labels", "Assignee", "Created"])
-        # table.add_column("Labels")
-        # table.add_column("Assignee")
-        # table.add_column("Created")
+        table.add_column("Labels")
+        table.add_column("Assignee")
+        table.add_column("Created")
 
     for ticket in tickets:
         row: list[str | None] = [
@@ -271,27 +270,20 @@ def publish(ctx: typer.Context) -> None:
                 logging.debug("Updating Task with Jira issue: %s", ticket.key)
                 task = candidates[0]
 
-                soup = BeautifulSoup(
-                    str(task.content).encode("ascii", "ignore"), "html.parser"
-                )
+                soup = BeautifulSoup(str(task.content).encode("ascii", "ignore"), "html.parser")
                 try:
                     # Add dated marker to comment section
                     list_item = soup.new_tag("li")
                     list_item.string = (
-                        f'{datetime.now().strftime("%Y-%m-%d %H:%M")}'
-                        " Update from Jira"
+                        f'{datetime.now().strftime("%Y-%m-%d %H:%M")}' " Update from Jira"
                     )
                     try:
                         # Append sync marker to existing comment section
-                        unbulleted_list = soup.find(
-                            "ul", {"class": "notes-list"}
-                        )
+                        unbulleted_list = soup.find("ul", {"class": "notes-list"})
                         unbulleted_list.append(list_item)  # type: ignore
                     except AttributeError:
                         # Create new comment section, append at end of note
-                        unbulleted_list = soup.new_tag(
-                            "ul", attrs={"class": "notes-list"}
-                        )
+                        unbulleted_list = soup.new_tag("ul", attrs={"class": "notes-list"})
                         unbulleted_list.append(list_item)
                         soup.append(unbulleted_list)
 
@@ -379,21 +371,17 @@ def _get_tickets(ctx: typer.Context) -> list[Ticket]:
 
     def _new_ticket(bug: Jira.Issue) -> Ticket:
         """Map Jira fields to Ticket fields, formatting as needed."""
-        assignee = (
-            bug.fields.assignee.displayName if bug.fields.assignee else None
-        )
+        assignee = bug.fields.assignee.displayName if bug.fields.assignee else None
 
         return Ticket(
             assignee=assignee,
             created=datetime.fromisoformat(bug.fields.created),
             key=bug.key,
-            labels=[l for l in bug.fields.labels],
+            labels=list(bug.fields.labels),
             priority=bug.fields.priority.name,
             status=bug.fields.status.name,
             summary=bug.fields.summary,
-            title=(
-                bug.fields.summary[:45] + "..." * (len(bug.fields.summary) > 45)
-            ),
+            title=(bug.fields.summary[:45] + "..." * (len(bug.fields.summary) > 45)),
             updated=datetime.fromisoformat(bug.fields.updated),
             url=bug.permalink(),
         )
