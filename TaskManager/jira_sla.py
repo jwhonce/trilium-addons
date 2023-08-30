@@ -34,6 +34,7 @@ if sys.version_info < (3, 10):
     sys.exit(1)
 
 logging.basicConfig(level=logging.WARN)
+LABEL_DATE = "%Y-%m-%d"
 
 cli = typer.Typer(
     rich_markup_mode="markdown",
@@ -126,6 +127,7 @@ def main(
 
     * **#taskTodoRoot** is the root of Due Tasks.
     """
+    _ = version
 
     trilium = Session(trilium_url, trilium_token)
     ctx.with_resource(trilium)
@@ -146,7 +148,7 @@ def main(
 
 @cli.command(name="list")
 @cli.command()
-def ls(ctx: typer.Context) -> None:
+def ls(ctx: typer.Context) -> None:  # pylint: disable=invalid-name
     """List Jira tickets that need to be triaged / escalated."""
     tickets = _get_tickets(ctx)
 
@@ -172,7 +174,7 @@ def ls(ctx: typer.Context) -> None:
                 [
                     "\n".join(ticket.labels),
                     ticket.assignee or "N/A",
-                    ticket.created.strftime("%Y-%m-%d"),
+                    ticket.created.strftime(LABEL_DATE),
                 ]
             )
 
@@ -227,7 +229,7 @@ def publish(ctx: typer.Context) -> None:
         )
         match len(candidates):
             case 0:
-                logging.debug("New Jira issue: %s" % ticket.key)
+                logging.debug("New Jira issue: %s", ticket.key)
 
                 task = Note(
                     title=f"{ticket.key}: {ticket.title}",
@@ -248,7 +250,7 @@ def publish(ctx: typer.Context) -> None:
                 task["iconClass"] = "bx bx-bug"
                 task["jiraKey"] = ticket.key
                 task["location"] = "work"
-                task["todoDate"] = ticket.created.strftime("%Y-%m-%d")
+                task["todoDate"] = ticket.created.strftime(LABEL_DATE)
                 task += [Label("tag", "jira")]
 
                 task_root += task
@@ -256,26 +258,26 @@ def publish(ctx: typer.Context) -> None:
                 task ^= (today, "TODO")
 
             case 1:
-                logging.debug("Updating Task with Jira issue: %s" % ticket.key)
+                logging.debug("Updating Task with Jira issue: %s", ticket.key)
                 task = candidates[0]
 
-                soup = BeautifulSoup(
-                    str(task.content).encode("ascii", "ignore"), "html.parser"
-                )
+                soup = BeautifulSoup(str(task.content).encode("ascii", "ignore"), "html.parser")
                 try:
                     # Add dated marker to comment section
-                    li = soup.new_tag("li")
-                    li.string = f'{datetime.now().strftime("%Y-%m-%d %H:%M")} Update from Jira'
+                    list_item = soup.new_tag("li")
+                    list_item.string = (
+                        f'{datetime.now().strftime("%Y-%m-%d %H:%M")} Update from Jira'
+                    )
 
                     try:
                         # Append sync marker to existing comment section
-                        ul = soup.find("ul", {"class": "notes-list"})
-                        ul.append(li)
+                        unbulleted_list = soup.find("ul", {"class": "notes-list"})
+                        unbulleted_list.append(list_item)
                     except AttributeError:
                         # Create new comment section, append at end of note
-                        ul = soup.new_tag("ul", attrs={"class": "notes-list"})
-                        ul.append(li)
-                        soup.append(ul)
+                        unbulleted_list = soup.new_tag("ul", attrs={"class": "notes-list"})
+                        unbulleted_list.append(list_item)
+                        soup.append(unbulleted_list)
 
                     task.content = str(soup)
                 finally:
@@ -290,7 +292,7 @@ def publish(ctx: typer.Context) -> None:
         task["jiraAssignee"] = ticket.assignee or "N/A"
         task["jiraPriority"] = ticket.priority
         task["jiraStatus"] = ticket.status
-        task["jiraUpdated"] = ticket.updated.strftime("%Y-%m-%d")
+        task["jiraUpdated"] = ticket.updated.strftime(LABEL_DATE)
         task["jiraLabels"] = ":".join(sorted(ticket.labels))
 
         trilium.flush()
@@ -302,7 +304,7 @@ def publish(ctx: typer.Context) -> None:
             ticket.title,
             "\n".join(ticket.labels),
             ticket.assignee or "N/A",
-            ticket.created.strftime("%Y-%m-%d"),
+            ticket.created.strftime(LABEL_DATE),
         )
 
     with Console() as console:
@@ -312,7 +314,7 @@ def publish(ctx: typer.Context) -> None:
 
 def _get_tickets(ctx: typer.Context) -> list[Ticket]:
     if ctx.obj.dry_run:
-        """Dry run, return a single known test ticket."""
+        # Dry run, return a single known test ticket.
         summary = (
             "Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor"
             " incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis"
@@ -359,9 +361,7 @@ def _get_tickets(ctx: typer.Context) -> list[Ticket]:
 
     def _new_ticket(bug: Jira.Issue) -> Ticket:
         """Map Jira fields to Ticket fields, formatting as needed."""
-        assignee = (
-            bug.fields.assignee.displayName if bug.fields.assignee else None
-        )
+        assignee = bug.fields.assignee.displayName if bug.fields.assignee else None
 
         return Ticket(
             assignee=assignee,
@@ -371,9 +371,7 @@ def _get_tickets(ctx: typer.Context) -> list[Ticket]:
             priority=bug.fields.priority.name,
             status=bug.fields.status.name,
             summary=bug.fields.summary,
-            title=(
-                bug.fields.summary[:45] + "..." * (len(bug.fields.summary) > 45)
-            ),
+            title=(bug.fields.summary[:45] + "..." * (len(bug.fields.summary) > 45)),
             updated=datetime.fromisoformat(bug.fields.updated),
             url=bug.permalink(),
         )
