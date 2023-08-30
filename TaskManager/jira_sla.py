@@ -54,6 +54,8 @@ class State:
 
 @dataclass(order=True, slots=True)
 class Ticket:
+    """Record Jira ticket information."""
+
     sort_index: datetime = field(init=False, repr=False)
     key: str
     summary: str
@@ -102,7 +104,7 @@ def main(
         typer.Option(
             "--verbose",
             "-v",
-            help="Display additional columns, defaults to False.",
+            help="Display additional columns.",
         ),
     ] = False,
     version: Annotated[
@@ -139,10 +141,10 @@ def main(
         logging.basicConfig(level=logging.DEBUG)
 
     ctx.obj = State(
-        trilium=trilium,
-        jira=jira,
-        verbose=verbose,
         dry_run=dry_run,
+        jira=jira,
+        trilium=trilium,
+        verbose=verbose,
     )
 
 
@@ -162,18 +164,24 @@ def ls(ctx: typer.Context) -> None:  # pylint: disable=invalid-name
         title="Tasks",
     )
     if ctx.obj.verbose:
-        table.add_column("Labels")
-        table.add_column("Assignee")
-        table.add_column("Created")
+        map(table.add_column, ["Labels", "Assignee", "Created"])
+        # table.add_column("Labels")
+        # table.add_column("Assignee")
+        # table.add_column("Created")
 
     for ticket in tickets:
-        row = [ticket.key, ticket.priority, ticket.status, ticket.title]
+        row: list[str | None] = [
+            ticket.key,
+            ticket.priority,
+            ticket.status,
+            ticket.title,
+        ]
 
         if ctx.obj.verbose:
             row.extend(
                 [
                     "\n".join(ticket.labels),
-                    ticket.assignee or "N/A",
+                    ticket.assignee,
                     ticket.created.strftime(LABEL_DATE),
                 ]
             )
@@ -202,6 +210,7 @@ def publish(ctx: typer.Context) -> None:
     table.add_column("Assignee")
     table.add_column("Created")
 
+    # pylint: disable=line-too-long
     html_template = Template(
         '<h2><a href="$url">$key</a></h2>'
         "<h3>Summary</h3>"
@@ -215,6 +224,7 @@ def publish(ctx: typer.Context) -> None:
         "<h3>Notes</h3>"
         '<ul class="notes-list"><li></li></ul>'
     )
+    # pylint: enable=line-too-long
 
     tickets = _get_tickets(ctx)
     trilium: Session = ctx.obj.trilium
@@ -261,21 +271,27 @@ def publish(ctx: typer.Context) -> None:
                 logging.debug("Updating Task with Jira issue: %s", ticket.key)
                 task = candidates[0]
 
-                soup = BeautifulSoup(str(task.content).encode("ascii", "ignore"), "html.parser")
+                soup = BeautifulSoup(
+                    str(task.content).encode("ascii", "ignore"), "html.parser"
+                )
                 try:
                     # Add dated marker to comment section
                     list_item = soup.new_tag("li")
                     list_item.string = (
-                        f'{datetime.now().strftime("%Y-%m-%d %H:%M")} Update from Jira'
+                        f'{datetime.now().strftime("%Y-%m-%d %H:%M")}'
+                        " Update from Jira"
                     )
-
                     try:
                         # Append sync marker to existing comment section
-                        unbulleted_list = soup.find("ul", {"class": "notes-list"})
-                        unbulleted_list.append(list_item)
+                        unbulleted_list = soup.find(
+                            "ul", {"class": "notes-list"}
+                        )
+                        unbulleted_list.append(list_item)  # type: ignore
                     except AttributeError:
                         # Create new comment section, append at end of note
-                        unbulleted_list = soup.new_tag("ul", attrs={"class": "notes-list"})
+                        unbulleted_list = soup.new_tag(
+                            "ul", attrs={"class": "notes-list"}
+                        )
                         unbulleted_list.append(list_item)
                         soup.append(unbulleted_list)
 
@@ -290,10 +306,10 @@ def publish(ctx: typer.Context) -> None:
 
         # Update Task metadata whether new or existing
         task["jiraAssignee"] = ticket.assignee or "N/A"
+        task["jiraLabels"] = ":".join(sorted(ticket.labels))
         task["jiraPriority"] = ticket.priority
         task["jiraStatus"] = ticket.status
         task["jiraUpdated"] = ticket.updated.strftime(LABEL_DATE)
-        task["jiraLabels"] = ":".join(sorted(ticket.labels))
 
         trilium.flush()
 
@@ -303,7 +319,7 @@ def publish(ctx: typer.Context) -> None:
             ticket.status,
             ticket.title,
             "\n".join(ticket.labels),
-            ticket.assignee or "N/A",
+            ticket.assignee,
             ticket.created.strftime(LABEL_DATE),
         )
 
@@ -315,6 +331,7 @@ def publish(ctx: typer.Context) -> None:
 def _get_tickets(ctx: typer.Context) -> list[Ticket]:
     if ctx.obj.dry_run:
         # Dry run, return a single known test ticket.
+        # cspell: disable
         summary = (
             "Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor"
             " incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis"
@@ -323,6 +340,7 @@ def _get_tickets(ctx: typer.Context) -> list[Ticket]:
             " eu fugiat nulla pariatur. Excepteur sint occaecat cupidatat non proident,"
             " sunt in culpa qui officia deserunt mollit anim id est laborum."
         )
+        # cspell: enable
 
         return [
             Ticket(
@@ -361,7 +379,9 @@ def _get_tickets(ctx: typer.Context) -> list[Ticket]:
 
     def _new_ticket(bug: Jira.Issue) -> Ticket:
         """Map Jira fields to Ticket fields, formatting as needed."""
-        assignee = bug.fields.assignee.displayName if bug.fields.assignee else None
+        assignee = (
+            bug.fields.assignee.displayName if bug.fields.assignee else None
+        )
 
         return Ticket(
             assignee=assignee,
@@ -371,7 +391,9 @@ def _get_tickets(ctx: typer.Context) -> list[Ticket]:
             priority=bug.fields.priority.name,
             status=bug.fields.status.name,
             summary=bug.fields.summary,
-            title=(bug.fields.summary[:45] + "..." * (len(bug.fields.summary) > 45)),
+            title=(
+                bug.fields.summary[:45] + "..." * (len(bug.fields.summary) > 45)
+            ),
             updated=datetime.fromisoformat(bug.fields.updated),
             url=bug.permalink(),
         )
