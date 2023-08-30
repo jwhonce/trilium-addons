@@ -35,11 +35,7 @@ cli = typer.Typer(
 
 @dataclass(frozen=True)
 class State:
-    """Record state of application.
-
-    :param verbose: display additional columns or data
-    :param dry_run: render table rather than updating Trilium
-    """
+    """Record state of application."""
 
     verbose: bool
     dry_run: bool
@@ -102,6 +98,7 @@ class BadDescription(typer.BadParameter):
 Description = Annotated[
     list[str],
     typer.Argument(
+        metavar="TITLE",
         autocompletion=_complete_description,
         show_default=False,
         help="Description of Task.",
@@ -163,7 +160,7 @@ def add(
     ] = None,
     location: Annotated[
         Optional[str],
-        typer.Option("--location", help="Location field for Task."),
+        typer.Option("--location", "-l", help="Location field for Task."),
     ] = None,
     tags: Annotated[
         Optional[list[str]],
@@ -310,17 +307,17 @@ def delete(
         raise BadDescription(description, ctx=ctx) from exc
 
 
-@cli.command()
-def done(
+@cli.command("done")
+def complete(
     ctx: typer.Context,
     description: Description,
-    completed: Annotated[
-        Optional[datetime],
+    done: Annotated[
+        datetime,
         typer.Option(
-            "--completed",
             formats=["%Y-%m-%d"],
             default_factory=datetime.now,
-            help="Date task was completed, defaults to today.",
+            show_default="today",  # type: ignore
+            help="Date task was completed.",
         ),
     ],
 ) -> None:
@@ -331,12 +328,12 @@ def done(
     title = " ".join(description)
 
     if ctx.obj.dry_run:
-        typer.echo(f'#doneDate={completed} #cssClass=done note.title="{title}"')
+        typer.echo(f'#doneDate={done} #cssClass=done note.title="{title}"')
         raise typer.Exit()
 
     try:
         task = session.search(f'#task note.title="{title}"')[0]
-        task["doneDate"] = completed.strftime("%Y-%m-%d")
+        task["doneDate"] = done.strftime("%Y-%m-%d")
         task["cssClass"] = "done"
     except IndexError as exc:
         raise BadDescription(description, ctx=ctx) from exc

@@ -11,11 +11,12 @@ Environment variables:
 import logging
 import sys
 from contextlib import closing
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from itertools import chain
 from string import Template
-from typing import Annotated, List, Optional
+from typing import Annotated, Optional
+from urllib.parse import urlparse
 
 import jira as Jira
 import typer
@@ -25,7 +26,7 @@ from rich.console import Console
 from rich.table import Table
 from trilium_alchemy import Label, Note, Session
 
-__version__ = "0.2.0"
+__version__ = "0.2.1"
 
 if sys.version_info < (3, 10):
     # minimum version for trilium-alchemy
@@ -36,32 +37,13 @@ logging.basicConfig(level=logging.WARN)
 
 cli = typer.Typer(
     rich_markup_mode="markdown",
-    context_settings={"help_option_names": ["--help", "-h"], "allow_interspersed_args": True},
+    context_settings={"help_option_names": ["--help", "-h"]},
 )
-
-
-@dataclass
-class Ticket:
-    key: str
-    summary: str
-    title: str
-    url: str
-    status: str
-    labels: List[str]
-    priority: str
-    created: datetime
-    updated: datetime
-    assignee: str | None
 
 
 @dataclass(frozen=True)
 class State:
-    """Record state for tm application.
-
-    :param trilium: instance of Session
-    :param verbose: display additional columns or data
-    :param dry_run: update / create test note in Trilium
-    """
+    """Record state for tm application."""
 
     jira: Jira.JIRA
     trilium: Session
@@ -69,29 +51,56 @@ class State:
     dry_run: bool
 
 
-def version_callback(value: bool):
-    """Print version and exit"""
+@dataclass(order=True, slots=True)
+class Ticket:
+    sort_index: datetime = field(init=False, repr=False)
+    key: str
+    summary: str
+    title: str
+    url: str
+    status: str
+    labels: list[str]
+    priority: str
+    created: datetime
+    updated: datetime
+    assignee: str | None
+
+    def __post_init__(self):
+        self.sort_index = self.created
+
+
+def _version(value: bool):
+    """Print version and exit."""
     if value:
         typer.echo(f"jira_sla v: {__version__}")
         raise typer.Exit()
 
 
+def _validate_url(url: str) -> str:
+    """Validate URL."""
+    result = urlparse(url)
+    if not all([result.scheme, result.netloc]):
+        raise typer.BadParameter(f"Invalid URL: {url}")
+    return url
+
+
 @cli.callback()
 def main(
     ctx: typer.Context,
-    trilium_token: Annotated[str, typer.Option("--trilium-token", envvar="TRILIUM_TOKEN")],
-    jira_token: Annotated[str, typer.Option("--jira-token", envvar="JIRA_TOKEN")],
+    trilium_token: Annotated[str, typer.Option(envvar="TRILIUM_TOKEN")],
+    jira_token: Annotated[str, typer.Option(envvar="JIRA_TOKEN")],
     trilium_url: Annotated[
-        str, typer.Option("--trilium-url", envvar="TRILIUM_URL")
+        str,
+        typer.Option(envvar="TRILIUM_URL", callback=_validate_url),
     ] = "http://localhost:8080",
     jira_url: Annotated[
-        str, typer.Option("--jira-url", envvar="JIRA_URL")
+        str, typer.Option(envvar="JIRA_URL", callback=_validate_url)
     ] = "https://issues.redhat.com",
     verbose: Annotated[
         bool,
         typer.Option(
             "--verbose",
-            "-V",
+            "-v",
             help="Display additional columns, defaults to False.",
         ),
     ] = False,
@@ -99,8 +108,7 @@ def main(
         Optional[bool],
         typer.Option(
             "--version",
-            "-v",
-            callback=version_callback,
+            callback=_version,
             is_eager=True,
             help="Show version and exit.",
         ),
@@ -136,14 +144,20 @@ def main(
     )
 
 
-@cli.command(name="ls")
+@cli.command(name="list")
 @cli.command()
-def list(ctx: typer.Context) -> None:
+def ls(ctx: typer.Context) -> None:
     """List Jira tickets that need to be triaged / escalated."""
-    tickets = get_tickets(ctx)
+    tickets = _get_tickets(ctx)
 
     table = Table(
-        "Key", "Priority", "Status", "Title", box=None, header_style="underline2", title="Tasks"
+        "Key",
+        "Priority",
+        "Status",
+        "Title",
+        box=None,
+        header_style="underline2",
+        title="Tasks",
     )
     if ctx.obj.verbose:
         table.add_column("Labels")
@@ -174,7 +188,13 @@ def publish(ctx: typer.Context) -> None:
     """Publish Jira tickets to Tasks in Trilium."""
 
     table = Table(
-        "Key", "Priority", "Status", "Title", box=None, header_style="underline2", title="Tasks"
+        "Key",
+        "Priority",
+        "Status",
+        "Title",
+        box=None,
+        header_style="underline2",
+        title="Tasks",
     )
     table.add_column("Labels")
     table.add_column("Assignee")
@@ -194,7 +214,7 @@ def publish(ctx: typer.Context) -> None:
         '<ul class="notes-list"><li></li></ul>'
     )
 
-    tickets = get_tickets(ctx)
+    tickets = _get_tickets(ctx)
     trilium: Session = ctx.obj.trilium
 
     task_root = trilium.search("#taskTodoRoot")[0]
@@ -202,12 +222,12 @@ def publish(ctx: typer.Context) -> None:
     today = trilium.get_today_note()
 
     for ticket in tickets:
-        candidate = trilium.search(
+        candidates = trilium.search(
             f'#task #!doneDate #jiraKey="{ticket.key}"', ancestor_note=task_root
         )
-        match len(candidate):
+        match len(candidates):
             case 0:
-                logging.debug(f"New Jira issue: {ticket.key}")
+                logging.debug("New Jira issue: %s" % ticket.key)
 
                 task = Note(
                     title=f"{ticket.key}: {ticket.title}",
@@ -236,10 +256,12 @@ def publish(ctx: typer.Context) -> None:
                 task ^= (today, "TODO")
 
             case 1:
-                logging.debug(f"Updating Task with Jira issue: {ticket.key}")
-                task = candidate[0]
+                logging.debug("Updating Task with Jira issue: %s" % ticket.key)
+                task = candidates[0]
 
-                soup = BeautifulSoup(str(task.content).encode("ascii", "ignore"), "html.parser")
+                soup = BeautifulSoup(
+                    str(task.content).encode("ascii", "ignore"), "html.parser"
+                )
                 try:
                     # Add dated marker to comment section
                     li = soup.new_tag("li")
@@ -288,7 +310,7 @@ def publish(ctx: typer.Context) -> None:
     raise typer.Exit()
 
 
-def get_tickets(ctx: typer.Context) -> List[Ticket]:
+def _get_tickets(ctx: typer.Context) -> list[Ticket]:
     if ctx.obj.dry_run:
         """Dry run, return a single known test ticket."""
         summary = (
@@ -322,7 +344,7 @@ def get_tickets(ctx: typer.Context) -> List[Ticket]:
         chain(
             jira.search_issues(
                 r"project = rhocpprio AND status not in (Closed)"
-                ' AND (component = Node OR assignee = "Jhon Honce")'
+                r' AND (component = Node OR assignee = "Jhon Honce")'
             ),
             jira.search_issues(
                 r'filter = "Node Components"'
@@ -335,9 +357,11 @@ def get_tickets(ctx: typer.Context) -> List[Ticket]:
         )
     )
 
-    def new_ticket(bug: Jira.Issue) -> Ticket:
+    def _new_ticket(bug: Jira.Issue) -> Ticket:
         """Map Jira fields to Ticket fields, formatting as needed."""
-        assignee = bug.fields.assignee.displayName if bug.fields.assignee else None
+        assignee = (
+            bug.fields.assignee.displayName if bug.fields.assignee else None
+        )
 
         return Ticket(
             assignee=assignee,
@@ -347,14 +371,16 @@ def get_tickets(ctx: typer.Context) -> List[Ticket]:
             priority=bug.fields.priority.name,
             status=bug.fields.status.name,
             summary=bug.fields.summary,
-            title=(bug.fields.summary[:45] + "..." * (len(bug.fields.summary) > 45)),
+            title=(
+                bug.fields.summary[:45] + "..." * (len(bug.fields.summary) > 45)
+            ),
             updated=datetime.fromisoformat(bug.fields.updated),
             url=bug.permalink(),
         )
 
-    tickets: List[Ticket] = []
+    tickets: list[Ticket] = []
     for issue in issues:
-        tickets.append(new_ticket(issue))
+        tickets.append(_new_ticket(issue))
     return tickets
 
 
