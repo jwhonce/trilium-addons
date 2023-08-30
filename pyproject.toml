@@ -1,0 +1,12 @@
+[project]
+authors         = [{ name = 'Jhon Honce' }]
+name            = 'trilium-addons'
+version         = "0.0.0"
+description     = "Trilium note taking app addons"
+readme          = "README.md"
+requires-python = ">=3.10"
+license         = "Apache-2.0"
+dependencies    = ["trilium-alchemy>=0.1.7", "trilium-py>0.8.3"]
+
+[project.optional-dependencies]
+backend = ["trilium @ https://github.com/zadam/trilium"]
