@@ -60,7 +60,7 @@ class State:
 
 @dataclass(order=True, slots=True)
 class Ticket:
-    """Record Jira ticket information."""
+    """Record Jira issue information."""
 
     sort_index: datetime = field(init=False, repr=False)
     title: str = field(init=False, repr=False, compare=False)
@@ -76,10 +76,10 @@ class Ticket:
 
     def __post_init__(self):
         self.sort_index = self.created
-        self.title = (
-            self.summary[:42]
-            + (self.summary[42:], "...")[len(self.summary) > 45]
-        )
+
+        self.title = self.summary
+        if len(self.summary) > 45:
+            self.title = self.summary[:42] + "..."
 
 
 def _version(value: bool):
@@ -148,7 +148,8 @@ def main(
     ctx.with_resource(closing(jira))
 
     if verbose:
-        logging.basicConfig(level=logging.DEBUG)
+        logging.getLogger().setLevel(level=logging.DEBUG)
+        logging.debug("%s v: %s", ctx.command.name, __version__)
 
     ctx.obj = State(
         dry_run=dry_run,
@@ -289,21 +290,16 @@ def publish(ctx: typer.Context) -> None:
                     # Dated marker to be added Notes list of task
                     list_item = soup.new_tag("li")
                     list_item.string = (
-                        f'{datetime.now().strftime("%Y-%m-%d %H:%M")}'
-                        " Update from Jira"
+                        f'{datetime.now().strftime("%Y-%m-%d %H:%M")}' " Update from Jira"
                     )
                     try:
                         # Append marker to existing task's "Notes" list
-                        unbulleted_list = soup.find(
-                            "ul", {"class": "notes-list"}
-                        )
+                        unbulleted_list = soup.find("ul", {"class": "notes-list"})
                         unbulleted_list.append(list_item)  # type: ignore
                     except AttributeError:
                         # Create new "Notes" list with marker to be appended
                         # at end of task body
-                        unbulleted_list = soup.new_tag(
-                            "ul", attrs={"class": "notes-list"}
-                        )
+                        unbulleted_list = soup.new_tag("ul", attrs={"class": "notes-list"})
                         unbulleted_list.append(list_item)
                         soup.append(unbulleted_list)
 
@@ -412,9 +408,7 @@ def _query_jira(ctx: typer.Context) -> list[Ticket]:
 
     def _new_ticket(bug: Jira.Issue) -> Ticket:
         """Map Jira fields to Ticket fields, formatting as needed."""
-        assignee = (
-            bug.fields.assignee.displayName if bug.fields.assignee else None
-        )
+        assignee = bug.fields.assignee.displayName if bug.fields.assignee else None
 
         return Ticket(
             assignee=assignee,
