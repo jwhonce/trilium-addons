@@ -2,11 +2,17 @@
 # -*- coding: utf-8 -*-
 """Query Jira for issues that need to be triaged / escalated.
 
+An exercise in using Python dataclass, Typer, Jira API and Trilium Notes APIs.
+
 Environment variables:
     * TRILIUM_URL should be set to the URL of the Trilium Notes server.
-        If not set, the default is http://localhost:8080.
+        [default: http://localhost:8080]
     * TRILIUM_TOKEN should be set to the API token for the Trilium Notes server.
-        If not set, the default is None.
+        [default: None]
+    * JIRA_URL should be set to the URL of the Jira server.
+        [default: https://issues.redhat.com]
+    * JIRA_TOKEN should be set to the API token for the Jira server.
+        [default: None]
 """
 import logging
 import sys
@@ -57,9 +63,9 @@ class Ticket:
     """Record Jira ticket information."""
 
     sort_index: datetime = field(init=False, repr=False)
+    title: str = field(init=False, repr=False, compare=False)
     key: str
     summary: str
-    title: str
     url: str
     status: str
     labels: list[str]
@@ -70,6 +76,10 @@ class Ticket:
 
     def __post_init__(self):
         self.sort_index = self.created
+        self.title = (
+            self.summary[:42]
+            + (self.summary[42:], "...")[len(self.summary) > 45]
+        )
 
 
 def _version(value: bool):
@@ -121,13 +131,13 @@ def main(
         typer.Option(
             "--dry-run",
             "-n",
-            help="Render Tasks as table rather than updating Trilium, defaults to False.",
+            help="Render Tasks as table rather than updating Trilium.",
         ),
     ] = False,
 ) -> None:
-    """Query Jira and update / create tasks to track important tickets.
+    """Query Jira and update / create Trilium Task Manager task(s) to curate important issues.
 
-    * **#taskTodoRoot** is the root of Due Tasks.
+    * **#taskTodoRoot** is the root of due Tasks.
     """
     _ = version
 
@@ -151,8 +161,8 @@ def main(
 @cli.command(name="list")
 @cli.command()
 def ls(ctx: typer.Context) -> None:  # pylint: disable=invalid-name
-    """List Jira tickets that need to be triaged / escalated."""
-    tickets = _get_tickets(ctx)
+    """List tagged Jira issues."""
+    tickets = _query_jira(ctx)
 
     table = Table(
         "Key",
@@ -194,7 +204,7 @@ def ls(ctx: typer.Context) -> None:  # pylint: disable=invalid-name
 
 @cli.command()
 def publish(ctx: typer.Context) -> None:
-    """Publish Jira tickets to Tasks in Trilium."""
+    """Publish tagged Jira issues to Tasks in Trilium."""
 
     table = Table(
         "Key",
@@ -210,6 +220,7 @@ def publish(ctx: typer.Context) -> None:
     table.add_column("Created")
 
     # pylint: disable=line-too-long
+    # Template rendered as HTML in Trilium Task Manager task's content
     html_template = Template(
         '<h2><a href="$url">$key</a></h2>'
         "<h3>Summary</h3>"
@@ -225,7 +236,7 @@ def publish(ctx: typer.Context) -> None:
     )
     # pylint: enable=line-too-long
 
-    tickets = _get_tickets(ctx)
+    tickets = _query_jira(ctx)
     trilium: Session = ctx.obj.trilium
 
     task_root = trilium.search("#taskTodoRoot")[0]
@@ -270,20 +281,29 @@ def publish(ctx: typer.Context) -> None:
                 logging.debug("Updating Task with Jira issue: %s", ticket.key)
                 task = candidates[0]
 
-                soup = BeautifulSoup(str(task.content).encode("ascii", "ignore"), "html.parser")
+                soup = BeautifulSoup(
+                    str(task.content).encode("ascii", "ignore"),
+                    "html.parser",
+                )
                 try:
-                    # Add dated marker to comment section
+                    # Dated marker to be added Notes list of task
                     list_item = soup.new_tag("li")
                     list_item.string = (
-                        f'{datetime.now().strftime("%Y-%m-%d %H:%M")}' " Update from Jira"
+                        f'{datetime.now().strftime("%Y-%m-%d %H:%M")}'
+                        " Update from Jira"
                     )
                     try:
-                        # Append sync marker to existing comment section
-                        unbulleted_list = soup.find("ul", {"class": "notes-list"})
+                        # Append marker to existing task's "Notes" list
+                        unbulleted_list = soup.find(
+                            "ul", {"class": "notes-list"}
+                        )
                         unbulleted_list.append(list_item)  # type: ignore
                     except AttributeError:
-                        # Create new comment section, append at end of note
-                        unbulleted_list = soup.new_tag("ul", attrs={"class": "notes-list"})
+                        # Create new "Notes" list with marker to be appended
+                        # at end of task body
+                        unbulleted_list = soup.new_tag(
+                            "ul", attrs={"class": "notes-list"}
+                        )
                         unbulleted_list.append(list_item)
                         soup.append(unbulleted_list)
 
@@ -320,9 +340,9 @@ def publish(ctx: typer.Context) -> None:
     raise typer.Exit()
 
 
-def _get_tickets(ctx: typer.Context) -> list[Ticket]:
+def _query_jira(ctx: typer.Context) -> list[Ticket]:
     if ctx.obj.dry_run:
-        # Dry run, return a single known test ticket.
+        # Dry run returns a single known test ticket.
         # cspell: disable
         summary = (
             "Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor"
@@ -343,15 +363,36 @@ def _get_tickets(ctx: typer.Context) -> list[Ticket]:
                 priority="Blocker",
                 status="Testing",
                 summary=summary,
-                title=(summary[:45] + "..." * (len(summary) > 45)),
                 updated=datetime.now(),
-                url="https://issues.example.com",
-            )
+                url="https://issues.example.com/TEST-1",
+            ),
+            Ticket(
+                assignee="developer",
+                created=datetime.now(),
+                key="TEST-2",
+                labels=["triaged"],
+                priority="Critical",
+                status="In Progress",
+                summary=summary[::-1],
+                updated=datetime.now(),
+                url="https://issues.example.com/TEST-2",
+            ),
+            Ticket(
+                assignee="user",
+                created=datetime.now(),
+                key="TEST-3",
+                labels=["triaged"],
+                priority="Normal",
+                status="Closed",
+                summary="This is a test ticket.",
+                updated=datetime.now(),
+                url="https://issues.example.com/TEST-3",
+            ),
         ]
 
     jira: Jira.JIRA = ctx.obj.jira
 
-    # Gather RHOCPPRIO and untriaged tickets
+    # Gather RHOCPPRIO and old untriaged tickets
     issues: ResultList[Jira.Issue] = ResultList(
         chain(
             jira.search_issues(
@@ -371,7 +412,9 @@ def _get_tickets(ctx: typer.Context) -> list[Ticket]:
 
     def _new_ticket(bug: Jira.Issue) -> Ticket:
         """Map Jira fields to Ticket fields, formatting as needed."""
-        assignee = bug.fields.assignee.displayName if bug.fields.assignee else None
+        assignee = (
+            bug.fields.assignee.displayName if bug.fields.assignee else None
+        )
 
         return Ticket(
             assignee=assignee,
@@ -381,7 +424,6 @@ def _get_tickets(ctx: typer.Context) -> list[Ticket]:
             priority=bug.fields.priority.name,
             status=bug.fields.status.name,
             summary=bug.fields.summary,
-            title=(bug.fields.summary[:45] + "..." * (len(bug.fields.summary) > 45)),
             updated=datetime.fromisoformat(bug.fields.updated),
             url=bug.permalink(),
         )
