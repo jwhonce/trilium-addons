@@ -86,6 +86,13 @@ class BadDescription(typer.BadParameter):
         param: Any = None,
         param_hint="Description",
     ) -> None:
+        """Initialize BadDescription Error.
+
+        :param description: Words given for Task description
+        :param ctx: Context of command
+        :param param: See typer.BadParameter#param, defaults to None
+        :param param_hint: See typer.BadParameter#param_hint, defaults to "Description"
+        """
         super().__init__(
             f'"{" ".join(description)}" not found.',
             ctx,
@@ -184,7 +191,6 @@ def add(
     ] = None,
 ) -> None:
     """Add Task to TaskManager."""
-
     if message and content:
         raise typer.BadParameter("Cannot specify both --message and --content")
 
@@ -238,7 +244,6 @@ def add(
 @cli.command()
 def ls(ctx: typer.Context) -> None:  # pylint: disable=invalid-name
     """List due Tasks."""
-
     table = Table(title="Tasks", box=None, header_style="underline2")
 
     table.add_column(header="Due", justify="center")
@@ -287,7 +292,6 @@ def delete(
     ] = False,
 ) -> None:
     """Delete Task."""
-
     if not force:
         raise typer.Abort()
 
@@ -322,7 +326,6 @@ def complete(
     ],
 ) -> None:
     """Mark Task as done."""
-
     # Note: All the heavy lifting is done by the JavaScript Implementation of TaskManager.
     session: Session = _open_session(ctx)
     title = " ".join(description)
@@ -342,7 +345,6 @@ def complete(
 @cli.command()
 def archive(ctx: typer.Context, description: Description) -> None:
     """Archive Task."""
-
     session: Session = _open_session(ctx)
     title = " ".join(description)
 

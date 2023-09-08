@@ -2,17 +2,17 @@
 # -*- coding: utf-8 -*-
 """Upload a file to a note in Trilium Notes.
 
-The script is intended to be a method of publishing a file to a Trilium Notes sync server 
-written in an IDE or editor.The script will use the filename as the title of the note. 
-If the note does not exist, an error will be returned. 
+The script is intended to be a method of publishing a file to a Trilium Notes sync server
+written in an IDE or editor.The script will use the filename as the title of the note.
+If the note does not exist, an error will be returned.
 
 The script will also set #lastUploadedDate of the note's #utcDateModified.
 
 Example:
     $ pushToNote.py ~/Documents/notes/2020-01-01.md
-        
+
 Environment variables:
-    * TRILIUM_URL should be set to the URL of the Trilium Notes server. 
+    * TRILIUM_URL should be set to the URL of the Trilium Notes server.
         If not set, the default is http://localhost:8080.
     * TRILIUM_TOKEN should be set to the API token for the Trilium Notes server.
         If not set, the default is None.
@@ -26,13 +26,21 @@ from typing import Annotated, Optional
 import typer
 from trilium_alchemy import Session
 
+if sys.version_info < (3, 10):
+    # minimum version for trilium-alchemy
+    typer.echo("Python 3.10 or higher is required.", err=True)
+    sys.exit(1)
+
 __version__ = "0.2.0"
 
-cli = typer.Typer(add_completion=False, context_settings={"help_option_names": ["-h", "--help"]})
+cli = typer.Typer(
+    add_completion=False,
+    context_settings={"help_option_names": ["-h", "--help"]},
+)
 
 
-def version_callback(value: bool):
-    """Print version and exit"""
+def _version(value: bool):
+    """Print version and exit."""
     if value:
         typer.echo(f"{sys.argv[0]} v: {__version__}")
         raise typer.Exit()
@@ -56,16 +64,24 @@ class State:
 def main(
     ctx: typer.Context,
     file: Annotated[
-        Path, typer.Argument(exists=True, readable=True, help="Filename to upload to Trilium Notes")
+        Path,
+        typer.Argument(
+            exists=True,
+            readable=True,
+            help="Filename to upload to Trilium Notes",
+        ),
     ],
-    url: Annotated[str, typer.Option("--service-url", envvar="TRILIUM_URL", is_eager=True)],
-    token: Annotated[str, typer.Option("--token", envvar="TRILIUM_TOKEN", is_eager=True)],
+    url: Annotated[
+        str, typer.Option("--service-url", envvar="TRILIUM_URL", is_eager=True)
+    ],
+    token: Annotated[
+        str, typer.Option("--token", envvar="TRILIUM_TOKEN", is_eager=True)
+    ],
     verbose: Annotated[
-        Optional[bool],
+        bool,
         typer.Option(
             "--verbose",
             "-v",
-            is_eager=True,
             help="Display additional data, defaults to False",
         ),
     ] = False,
@@ -74,17 +90,16 @@ def main(
         typer.Option(
             "--version",
             "-V",
-            callback=version_callback,
+            callback=_version,
             is_eager=True,
             help="Show version and exit",
         ),
-    ] = False,
+    ] = None,
     dry_run: Annotated[
-        Optional[bool],
+        bool,
         typer.Option(
             "--dry-run",
             "-n",
-            is_eager=True,
             help="Render data as table rather than updating Trilium, defaults to False",
         ),
     ] = False,
@@ -111,7 +126,9 @@ def main(
                 notes[0].content = file.read_text()
                 notes[0]["lastUploadedDate"] = datetime.utcnow().isoformat()
             case _:
-                typer.echo(f"More than 1 matching note '{title}' found", err=True)
+                typer.echo(
+                    f"More than 1 matching note '{title}' found", err=True
+                )
                 raise typer.Abort()
 
 
