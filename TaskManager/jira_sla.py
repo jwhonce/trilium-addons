@@ -74,7 +74,8 @@ class Ticket:
     updated: datetime
     url: str
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
+        """Set internal fields after __init__."""
         self.sort_index = self.created
 
         self.title = self.summary
@@ -206,7 +207,6 @@ def ls(ctx: typer.Context) -> None:  # pylint: disable=invalid-name
 @cli.command()
 def publish(ctx: typer.Context) -> None:
     """Publish tagged Jira issues to Tasks in Trilium."""
-
     table = Table(
         "Key",
         "Priority",
@@ -338,7 +338,6 @@ def publish(ctx: typer.Context) -> None:
 
     with Console() as console:
         console.print(table)
-    raise typer.Exit()
 
 
 def _query_jira(ctx: typer.Context) -> list[Ticket]:
