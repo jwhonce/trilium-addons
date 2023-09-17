@@ -154,7 +154,7 @@ def main(
 
 @cli.command(name="update", help="Update Task.")
 @cli.command()
-def add(
+def add(  # pylint: disable=too-many-arguments
     ctx: typer.Context,
     description: Description,
     due: Annotated[
