@@ -59,7 +59,7 @@ class State:
 
 
 @dataclass(order=True, slots=True)
-class Ticket:
+class Ticket:  # pylint: disable=too-many-instance-attributes
     """Record Jira issue information."""
 
     sort_index: datetime = field(init=False, repr=False)
@@ -99,7 +99,7 @@ def _validate_url(url: str) -> str:
 
 
 @cli.callback()
-def main(
+def main(  # pylint: disable=too-many-arguments
     ctx: typer.Context,
     trilium_token: Annotated[str, typer.Option(envvar="TRILIUM_TOKEN")],
     jira_token: Annotated[str, typer.Option(envvar="JIRA_TOKEN")],
@@ -212,13 +212,13 @@ def publish(ctx: typer.Context) -> None:
         "Priority",
         "Status",
         "Title",
+        "Labels",
+        "Assignee",
+        "Created",
         box=None,
         header_style="underline2",
         title="Tasks",
     )
-    table.add_column("Labels")
-    table.add_column("Assignee")
-    table.add_column("Created")
 
     # pylint: disable=line-too-long
     # Template rendered as HTML in Trilium Task Manager task's content
@@ -237,7 +237,7 @@ def publish(ctx: typer.Context) -> None:
     )
     # pylint: enable=line-too-long
 
-    tickets = _query_jira(ctx)
+    tickets: list[Ticket] = _query_jira(ctx)
     trilium: Session = ctx.obj.trilium
 
     task_root = trilium.search("#taskTodoRoot")[0]
