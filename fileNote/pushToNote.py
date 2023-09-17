@@ -61,8 +61,7 @@ class State:
 
 
 @cli.callback(invoke_without_command=True)
-def main(
-    ctx: typer.Context,
+def main(  # pylint: disable=too-many-arguments
     file: Annotated[
         Path,
         typer.Argument(
@@ -77,14 +76,6 @@ def main(
     token: Annotated[
         str, typer.Option("--token", envvar="TRILIUM_TOKEN", is_eager=True)
     ],
-    verbose: Annotated[
-        bool,
-        typer.Option(
-            "--verbose",
-            "-v",
-            help="Display additional data, defaults to False",
-        ),
-    ] = False,
     version: Annotated[
         Optional[bool],
         typer.Option(
@@ -111,6 +102,8 @@ def main(
     :param token: Trilium API token
     :param version: display version and exit
     """
+    _ = version
+
     if dry_run:
         typer.echo(f"File: {file} (URL: {url}, Token: {token})")
         raise typer.Exit()

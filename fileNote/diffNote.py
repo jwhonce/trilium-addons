@@ -12,7 +12,6 @@ Environment variables:
         If not set, the default is None.
 """
 
-from calendar import c
 import difflib
 import sys
 from dataclasses import dataclass
@@ -21,7 +20,7 @@ from pathlib import Path
 from typing import Annotated, Optional
 
 import typer
-from trilium_alchemy import Session, Note
+from trilium_alchemy import Note, Session
 
 if sys.version_info < (3, 10):
     # minimum version for trilium-alchemy
@@ -58,8 +57,7 @@ class State:
 
 
 @cli.callback(invoke_without_command=True)
-def main(
-    ctx: typer.Context,
+def main(  # pylint: disable=too-many-arguments
     file: Annotated[
         Path,
         typer.Argument(
@@ -80,14 +78,6 @@ def main(
             help="title of note containing file contents. Defaults to filename"
         ),
     ] = None,
-    verbose: Annotated[
-        bool,
-        typer.Option(
-            "--verbose",
-            "-v",
-            help="Display additional data, Defaults to False",
-        ),
-    ] = False,
     version: Annotated[
         Optional[bool],
         typer.Option(
@@ -108,6 +98,8 @@ def main(
     ] = False,
 ) -> None:
     """Diff a file with a note in Trilium Notes."""
+    _ = version
+
     if dry_run:
         typer.echo(f"File: {file} (URL: {url}, Token: {token})")
         raise typer.Exit()
@@ -123,8 +115,10 @@ def main(
                 raise typer.Abort()
             case 1:
                 content = file.read_text().split("\n")
-                t = datetime.fromtimestamp(file.lstat().st_mtime, timezone.utc)
-                timestamp = t.astimezone().isoformat()
+                mtime = datetime.fromtimestamp(
+                    file.lstat().st_mtime, timezone.utc
+                )
+                timestamp = mtime.astimezone().isoformat()
 
                 results = list(
                     difflib.unified_diff(
