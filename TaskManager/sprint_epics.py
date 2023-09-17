@@ -4,27 +4,21 @@
 
 import logging
 import sys
-from calendar import week
 from contextlib import closing
 from dataclasses import dataclass, field
 from datetime import datetime
-from re import A
 from typing import Annotated, Optional
 from urllib.parse import urlparse
 
 import jira as Jira
 import pytz
-import scipy as sp
 import typer
-from bs4 import BeautifulSoup
 from jinja2 import Environment, Template
 from jira.client import ResultList
-from regex import R
 from rich.console import Console
 from rich.styled import Styled
 from rich.table import Table
-from tomlkit import table
-from trilium_alchemy import Label, Note, Session
+from trilium_alchemy import Note, Session
 
 __version__ = "0.2.1"
 
@@ -53,7 +47,7 @@ class State:
 
 
 @dataclass(order=True, slots=True)
-class Ticket:
+class Ticket:  # pylint: disable=too-many-instance-attributes
     """Record Jira issue information."""
 
     sort_index: datetime = field(init=False, repr=False)
@@ -96,7 +90,7 @@ def _validate_url(url: str) -> str:
 
 
 @cli.callback()
-def main(
+def main(  # pylint: disable=too-many-arguments
     ctx: typer.Context,
     trilium_token: Annotated[str, typer.Option(envvar="TRILIUM_TOKEN")],
     jira_token: Annotated[str, typer.Option(envvar="JIRA_TOKEN")],
@@ -159,7 +153,7 @@ def main(
 
 @cli.command("list")
 @cli.command()
-def ls(ctx: typer.Context) -> None:
+def ls(ctx: typer.Context) -> None:  # pylint: disable=invalid-name
     """List active epics."""
     epics: list[Ticket] = _query_jira(ctx)
 
@@ -180,7 +174,7 @@ def ls(ctx: typer.Context) -> None:
     for epic in epics:
         if this_week == epic.week:
             flagged_updated = Styled(
-                epic.updated.strftime("%Y-%m-%d"), "bold italic"
+                epic.updated.strftime("%Y-%m-%d*"), "bold italic"
             )
         else:
             flagged_updated = Styled(
@@ -202,36 +196,42 @@ def ls(ctx: typer.Context) -> None:
 @cli.command()
 def publish(ctx: typer.Context) -> None:
     """Publish active epics to Trilium Note #."""
+    # Console.export_html() does not create html that can be rendered by
+    # Trilium.  Use Jinja2 to create html.
     trilium: Session = ctx.obj.trilium
 
     try:
-        epics_root = trilium.search("#jiraActiveEpicsRoot")[0]
-    except IndexError:
+        epics_root: Note = trilium.search("#jiraActiveEpicsRoot")[0]
+    except IndexError as err:
         typer.echo("Unable to find #jiraActiveEpicsRoot", err=True)
-        raise typer.Exit(1)
+        raise typer.Exit(1) from err
 
     epics: list[Ticket] = _query_jira(ctx)
 
-    content = r"""<table style="padding:0px;">
-    <caption>Active Epics: {{epics|length}} (Updated: {{now()}})</caption>
-    <tr><td>Key</td><td>Status</td><td>Summary</td><td>Updated</td></tr>
+    content = r"""<table style="padding:0px;width:100%;">
+    <caption>
+    Active Epics: {{epics|length}}  &#10098; Updated: {{now()}} &#10099;
+    </caption>
+    <tr>
+    <td>Key</td><td>Status</td><td>Summary</td><td>Updated</td>
+    </tr>
     {%- for epic in epics %}
     <tr>
-      <td><a href={{ epic.url }}>{{ epic.key }}</a></td>
-      <td>{{ epic.status }}</td>
-      <td>{{ epic.summary }}</td>
-      {%- if epic.week == week %}
-        <td>{{ epic.updated.strftime("%Y-%m-%d %H:%M:%S") }}*</td>
-      {%- else %}
-        <td>{{ epic.updated.strftime("%Y-%m-%d %H:%M:%S") }}</td>
-      {%- endif %}
+    <td><a href={{ epic.url }}>{{ epic.key }}</a></td>
+    <td>{{ epic.status }}</td>
+    <td>{{ epic.summary }}</td>
+    {%- if epic.week == week %}
+    <td>{{ epic.updated.strftime("%Y-%m-%d %H:%M:%S") }}*</td>
+    {%- else %}
+    <td>{{ epic.updated.strftime("%Y-%m-%d %H:%M:%S") }}</td>
+    {%- endif %}
     </tr>
     {%- endfor %}
     </table>
     """
 
     env = Environment(trim_blocks=True, lstrip_blocks=True)
-    template = env.get_template(Template(content))
+    template: Template = env.get_template(Template(content))
 
     trilium: Session = ctx.obj.trilium
     epics_root.content = template.render(
