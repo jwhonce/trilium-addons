@@ -29,6 +29,29 @@ if sys.version_info < (3, 10):
 
 logging.basicConfig(level=logging.WARN)
 
+JINJA_SOURCE = r"""<table style="padding:0px;width:100%;">
+<caption>
+Active Epics: {{epics|length}} &rarr; Week: {{ now().isocalendar().week }}  &#10098; Updated: {{now().strftime("%Y-%m-%d %H:%M:%S") }} &#10099;
+</caption>
+<thread>
+<tr>
+<th>Key</th><th>Status</th><th>Summary</th><th>Updated</th>
+</tr>
+</thread>
+{%- for epic in epics %}
+<tr>
+<td><a href={{ epic.url }}>{{ epic.key }}</a></td>
+<td>{{ epic.status }}</td>
+<td>{{ epic.summary }}</td>
+{%- if epic.week == week %}
+<td>{{ epic.updated.strftime("%Y-%m-%d %H:%M:%S") }}*</td>
+{%- else %}
+<td>{{ epic.updated.strftime("%Y-%m-%d %H:%M:%S") }}</td>
+{%- endif %}
+</tr>
+{%- endfor %}
+</table>
+"""
 
 cli = typer.Typer(
     rich_markup_mode="markdown",
@@ -208,34 +231,10 @@ def publish(ctx: typer.Context) -> None:
 
     epics: list[Ticket] = _query_jira(ctx)
 
-    content = r"""<table style="padding:0px;width:100%;">
-<caption>
-Active Epics: {{epics|length}} &rarr; Week: {{ now().isocalendar().week }}  &#10098; Updated: {{now().strftime("%Y-%m-%d %H:%M:%S") }} &#10099;
-</caption>
-<thread>
-<tr>
-<th>Key</th><th>Status</th><th>Summary</th><th>Updated</th>
-</tr>
-</thread>
-{%- for epic in epics %}
-<tr>
-<td><a href={{ epic.url }}>{{ epic.key }}</a></td>
-<td>{{ epic.status }}</td>
-<td>{{ epic.summary }}</td>
-{%- if epic.week == week %}
-<td>{{ epic.updated.strftime("%Y-%m-%d %H:%M:%S") }}*</td>
-{%- else %}
-<td>{{ epic.updated.strftime("%Y-%m-%d %H:%M:%S") }}</td>
-{%- endif %}
-</tr>
-{%- endfor %}
-</table>
-"""
+    template: Template = Environment(
+        trim_blocks=True, lstrip_blocks=True
+    ).get_template(Template(JINJA_SOURCE))
 
-    env = Environment(trim_blocks=True, lstrip_blocks=True)
-    template: Template = env.get_template(Template(content))
-
-    trilium: Session = ctx.obj.trilium
     epics_root.content = template.render(
         epics=epics, now=datetime.now, week=datetime.now().isocalendar().week
     )
