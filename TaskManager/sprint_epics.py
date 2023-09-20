@@ -1,20 +1,36 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Query Jira for active epics and update task with information for email status."""
+"""Query Jira for active epics and update task with information for status report.
+
+An exercise in using jinja2 to create html for Trilium.
+
+Environment variables:
+    * TRILIUM_URL should be set to the URL of the Trilium Notes server.
+        [default: http://localhost:8080]
+    * TRILIUM_TOKEN should be set to the API token for the Trilium Notes server.
+        [default: None]
+    * JIRA_URL should be set to the URL of the Jira server.
+        [default: https://issues.redhat.com]
+    * JIRA_TOKEN should be set to the API token for the Jira server.
+        [default: None]
+"""
 
 import logging
 import sys
 from contextlib import closing
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import date, datetime
+from functools import cache
 from typing import Annotated, Optional
 from urllib.parse import urlparse
 
 import jira as Jira
 import pytz
 import typer
+from dateutil.relativedelta import MO, relativedelta
 from jinja2 import Environment, Template
 from jira.client import ResultList
+from matplotlib import style
 from rich.console import Console
 from rich.styled import Styled
 from rich.table import Table
@@ -34,8 +50,11 @@ JINJA_SOURCE = r"""<table style="padding:0px;width:100%;">
 Active Epics: {{epics|length}} &rarr; Week: {{ now().isocalendar().week }}  &#10098; Updated: {{now().strftime("%Y-%m-%d %H:%M:%S") }} &#10099;
 </caption>
 <thread>
-<tr>
-<th>Key</th><th>Status</th><th>Summary</th><th>Updated</th>
+<tr style="border:1px solid white;">
+<th>Key</th>
+<th>Status</th>
+<th style="text-align:justify;">Summary</th>
+<th>Updated</th>
 </tr>
 </thread>
 {%- for epic in epics %}
@@ -43,10 +62,10 @@ Active Epics: {{epics|length}} &rarr; Week: {{ now().isocalendar().week }}  &#10
 <td><a href={{ epic.url }}>{{ epic.key }}</a></td>
 <td>{{ epic.status }}</td>
 <td>{{ epic.summary }}</td>
-{%- if epic.week == week %}
-<td>{{ epic.updated.strftime("%Y-%m-%d %H:%M:%S") }}*</td>
+{%- if epic.updated > _last_monday %}
+<td><strong>{{ epic.updated.strftime("%Y-%m-%d %H:%M:%S") }}*</strong></td>
 {%- else %}
-<td>{{ epic.updated.strftime("%Y-%m-%d %H:%M:%S") }}</td>
+<td><small>{{ epic.updated.strftime("%Y-%m-%d %H:%M:%S") }}</small></td>
 {%- endif %}
 </tr>
 {%- endfor %}
@@ -110,6 +129,14 @@ def _validate_url(url: str) -> str:
     if not all([result.scheme, result.netloc]):
         raise typer.BadParameter(f"Invalid URL: {url}")
     return url
+
+
+@cache
+def _last_monday() -> date:
+    """Return date of Monday before last..."""
+    today = datetime.now().replace(tzinfo=pytz.utc)
+    offset = -1 if today.weekday() == 0 else -2
+    return today - relativedelta(weekday=MO(offset))
 
 
 @cli.callback()
@@ -185,7 +212,6 @@ def ls(ctx: typer.Context) -> None:  # pylint: disable=invalid-name
         "Status",
         "Summary",
         "Updated",
-        "URL",
         box=None,
         header_style="underline2",
         title=f"Active Epics: {len(epics)}",
@@ -193,9 +219,8 @@ def ls(ctx: typer.Context) -> None:  # pylint: disable=invalid-name
         caption_justify="left",
     )
 
-    this_week = datetime.now().isocalendar().week
     for epic in epics:
-        if this_week == epic.week:
+        if epic.updated >= _last_monday():
             flagged_updated = Styled(
                 epic.updated.strftime("%Y-%m-%d*"), "bold italic"
             )
@@ -205,11 +230,10 @@ def ls(ctx: typer.Context) -> None:  # pylint: disable=invalid-name
             )
 
         table.add_row(
-            epic.key,
+            Styled(epic.key, style=f"link {epic.url}"),
             epic.status,
             epic.summary,
             flagged_updated,
-            Styled(epic.url, style=f"link {epic.url}"),
         )
 
     with Console() as console:
@@ -236,7 +260,9 @@ def publish(ctx: typer.Context) -> None:
     ).get_template(Template(JINJA_SOURCE))
 
     epics_root.content = template.render(
-        epics=epics, now=datetime.now, week=datetime.now().isocalendar().week
+        epics=epics,
+        now=datetime.now,
+        _last_monday=_last_monday(),
     )
 
 
