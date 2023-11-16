@@ -66,17 +66,11 @@ def main(  # pylint: disable=too-many-arguments
             help="Filename to upload to Trilium Notes",
         ),
     ],
-    url: Annotated[
-        str, typer.Option("--service-url", envvar="TRILIUM_URL", is_eager=True)
-    ],
-    token: Annotated[
-        str, typer.Option("--token", envvar="TRILIUM_TOKEN", is_eager=True)
-    ],
+    url: Annotated[str, typer.Option("--trilium-url", envvar="TRILIUM_URL")],
+    token: Annotated[str, typer.Option("--trilium-token", envvar="TRILIUM_TOKEN")],
     title: Annotated[
         Optional[str],
-        typer.Option(
-            help="title of note containing file contents. Defaults to filename"
-        ),
+        typer.Option(help="title of note containing file contents. Defaults to filename"),
     ] = None,
     version: Annotated[
         Optional[bool],
@@ -115,9 +109,7 @@ def main(  # pylint: disable=too-many-arguments
                 raise typer.Abort()
             case 1:
                 content = file.read_text().split("\n")
-                mtime = datetime.fromtimestamp(
-                    file.lstat().st_mtime, timezone.utc
-                )
+                mtime = datetime.fromtimestamp(file.lstat().st_mtime, timezone.utc)
                 timestamp = mtime.astimezone().isoformat()
 
                 results = list(
@@ -139,9 +131,7 @@ def main(  # pylint: disable=too-many-arguments
                 raise typer.Exit(code=1)
 
             case _:
-                typer.echo(
-                    f"More than 1 matching note '{title}' found", err=True
-                )
+                typer.echo(f"More than 1 matching note '{title}' found", err=True)
                 raise typer.Abort()
 
 

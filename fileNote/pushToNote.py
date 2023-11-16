@@ -70,12 +70,12 @@ def main(  # pylint: disable=too-many-arguments
             help="Filename to upload to Trilium Notes",
         ),
     ],
-    url: Annotated[
-        str, typer.Option("--service-url", envvar="TRILIUM_URL", is_eager=True)
+    title: Annotated[
+        Optional[str],
+        typer.Option(help="title of Note to update. Defaults to filename"),
     ],
-    token: Annotated[
-        str, typer.Option("--token", envvar="TRILIUM_TOKEN", is_eager=True)
-    ],
+    url: Annotated[str, typer.Option("--trilium-url", envvar="TRILIUM_URL")],
+    token: Annotated[str, typer.Option("--trilium-token", envvar="TRILIUM_TOKEN")],
     version: Annotated[
         Optional[bool],
         typer.Option(
@@ -108,7 +108,9 @@ def main(  # pylint: disable=too-many-arguments
         typer.echo(f"File: {file} (URL: {url}, Token: {token})")
         raise typer.Exit()
 
-    title = file.name
+    if title is None:
+        title = file.name
+
     with Session(url, token) as trilium:
         notes = trilium.search(f'note.title="{title}"')
         match len(notes):
@@ -119,9 +121,7 @@ def main(  # pylint: disable=too-many-arguments
                 notes[0].content = file.read_text()
                 notes[0]["lastUploadedDate"] = datetime.utcnow().isoformat()
             case _:
-                typer.echo(
-                    f"More than 1 matching note '{title}' found", err=True
-                )
+                typer.echo(f"More than 1 matching note '{title}' found", err=True)
                 raise typer.Abort()
 
 

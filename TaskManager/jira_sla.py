@@ -122,6 +122,7 @@ def main(  # pylint: disable=too-many-arguments
         Optional[bool],
         typer.Option(
             "--version",
+            "-V",
             callback=_version,
             is_eager=True,
             help="Show version and exit.",
@@ -290,21 +291,16 @@ def publish(ctx: typer.Context) -> None:
                     # Dated marker to be added Notes list of task
                     list_item = soup.new_tag("li")
                     list_item.string = (
-                        f'{datetime.now().strftime("%Y-%m-%d %H:%M")}'
-                        " Update from Jira"
+                        f'{datetime.now().strftime("%Y-%m-%d %H:%M")}' " Update from Jira"
                     )
                     try:
                         # Append marker to existing task's "Notes" list
-                        unbulleted_list = soup.find(
-                            "ul", {"class": "notes-list"}
-                        )
+                        unbulleted_list = soup.find("ul", {"class": "notes-list"})
                         unbulleted_list.append(list_item)  # type: ignore
                     except AttributeError:
                         # Create new "Notes" list with marker to be appended
                         # at end of task body
-                        unbulleted_list = soup.new_tag(
-                            "ul", attrs={"class": "notes-list"}
-                        )
+                        unbulleted_list = soup.new_tag("ul", attrs={"class": "notes-list"})
                         unbulleted_list.append(list_item)
                         soup.append(unbulleted_list)
 
@@ -412,9 +408,7 @@ def _query_jira(ctx: typer.Context) -> list[Ticket]:
 
     def _new_ticket(bug: Jira.Issue) -> Ticket:
         """Map Jira fields to Ticket fields, formatting as needed."""
-        assignee = (
-            bug.fields.assignee.displayName if bug.fields.assignee else None
-        )
+        assignee = bug.fields.assignee.displayName if bug.fields.assignee else None
 
         return Ticket(
             assignee=assignee,

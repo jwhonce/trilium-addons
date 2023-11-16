@@ -13,7 +13,7 @@ const TPL = `<div style="padding: 10px; border-top: 1px solid var(--main-border-
 class JiraWidget extends api.NoteContextAwareWidget {
     get position() { return 100; } // higher value means position towards the bottom/right
 
-    get parentWidget() { return 'center-pane'; }
+    get parentWidget() { return 'note-detail-pane'; }
 
     isEnabled() {
         return super.isEnabled()

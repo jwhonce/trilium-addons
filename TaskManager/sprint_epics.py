@@ -86,7 +86,7 @@ cli = typer.Typer(
 
 @dataclass(frozen=True)
 class State:
-    """Record state for tm application."""
+    """Record state for application."""
 
     jira: Jira.JIRA
     trilium: Session
@@ -241,14 +241,14 @@ def ls(ctx: typer.Context) -> None:  # pylint: disable=invalid-name
         caption_justify="left",
     )
 
-    for issue in issues:
-        if issue.updated >= _last_monday():
+    for epic in epics:
+        if epic.updated >= _last_monday():
             flagged_updated = Styled(
-                issue.updated.strftime("%Y-%m-%d*"), "bold italic"
+                epic.updated.strftime("%Y-%m-%d*"), "bold italic"
             )
         else:
             flagged_updated = Styled(
-                issue.updated.strftime("%Y-%m-%d"), style="dim"
+                epic.updated.strftime("%Y-%m-%d"), style="dim"
             )
 
         table.add_row(
@@ -277,9 +277,9 @@ def publish(ctx: typer.Context) -> None:
 
     (sprint, issues) = _query_jira(ctx)
 
-    template: Template = Environment(
-        trim_blocks=True, lstrip_blocks=True
-    ).get_template(Template(JINJA_SOURCE))
+    template: Template = Environment(trim_blocks=True, lstrip_blocks=True).get_template(
+        Template(JINJA_SOURCE)
+    )
 
     epics_root.content = template.render(
         epics=issues,
@@ -319,9 +319,7 @@ def _query_jira(ctx: typer.Context) -> Tuple[Sprint, list[Ticket]]:
 
     def _new_ticket(bug: Jira.Issue) -> Ticket:
         """Map Jira fields to Ticket fields, formatting as needed."""
-        assignee = (
-            bug.fields.assignee.displayName if bug.fields.assignee else None
-        )
+        assignee = bug.fields.assignee.displayName if bug.fields.assignee else None
 
         return Ticket(
             assignee=assignee,
