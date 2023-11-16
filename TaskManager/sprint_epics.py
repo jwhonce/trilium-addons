@@ -241,15 +241,11 @@ def ls(ctx: typer.Context) -> None:  # pylint: disable=invalid-name
         caption_justify="left",
     )
 
-    for epic in epics:
-        if epic.updated >= _last_monday():
-            flagged_updated = Styled(
-                epic.updated.strftime("%Y-%m-%d*"), "bold italic"
-            )
+    for issue in issues:
+        if issue.updated >= _last_monday():
+            flagged_updated = Styled(issue.updated.strftime("%Y-%m-%d*"), "bold italic")
         else:
-            flagged_updated = Styled(
-                epic.updated.strftime("%Y-%m-%d"), style="dim"
-            )
+            flagged_updated = Styled(issue.updated.strftime("%Y-%m-%d"), style="dim")
 
         table.add_row(
             Styled(issue.key, style=f"link {issue.url}"),
