@@ -19,18 +19,16 @@ import logging
 import sys
 from contextlib import closing
 from dataclasses import dataclass, field
-from datetime import date, datetime
+from datetime import UTC, date, datetime
 from functools import cache
-from typing import Annotated, Optional
+from typing import Annotated, Optional, Tuple
 from urllib.parse import urlparse
 
 import jira as Jira
-import pytz
 import typer
 from dateutil.relativedelta import MO, relativedelta
 from jinja2 import Environment, Template
 from jira.client import ResultList
-from matplotlib import style
 from rich.console import Console
 from rich.styled import Styled
 from rich.table import Table
@@ -45,23 +43,29 @@ if sys.version_info < (3, 10):
 
 logging.basicConfig(level=logging.WARN)
 
-JINJA_SOURCE = r"""<table style="padding:0px;width:100%;">
+# <tr style="border:2px solid white;">
+#
+JINJA_SOURCE = r"""
+<h3>Sprint "{{ sprint.name }}" Start Date: {{ sprint.start_date.strftime("%Y-%m-%d") }}</h3>
+<figure class="table" style="width:100%">
+<table style="padding:0px;">
 <caption>
-Active Epics: {{epics|length}} &rarr; Week: {{ now().isocalendar().week }}  &#10098; Updated: {{now().strftime("%Y-%m-%d %H:%M:%S") }} &#10099;
+Active Issues: {{epics|length}} &rarr; Week: {{ now().isocalendar().week }}  &#10098; Updated: {{now().strftime("%Y-%m-%d %H:%M:%S") }} &#10099;
 </caption>
-<thread>
-<tr style="border:1px solid white;">
-<th>Key</th>
-<th>Status</th>
-<th style="text-align:justify;">Summary</th>
-<th>Updated</th>
+<thead>
+<tr>
+<th style="background-color:#99d0df70;">Key</th>
+<th style="background-color:#99d0df70;">Status</th>
+<th style="background-color:#99d0df70;">Summary</th>
+<th style="background-color:#99d0df70;">Updated</th>
 </tr>
-</thread>
+</thead>
+<tbody>
 {%- for epic in epics %}
 <tr>
 <td><a href={{ epic.url }}>{{ epic.key }}</a></td>
 <td>{{ epic.status }}</td>
-<td>{{ epic.summary }}</td>
+<td style="text-align:justify;white-space:wrap;">{{ epic.summary }}</td>
 {%- if epic.updated > _last_monday %}
 <td><strong>{{ epic.updated.strftime("%Y-%m-%d %H:%M:%S") }}*</strong></td>
 {%- else %}
@@ -69,7 +73,9 @@ Active Epics: {{epics|length}} &rarr; Week: {{ now().isocalendar().week }}  &#10
 {%- endif %}
 </tr>
 {%- endfor %}
+</tbody>
 </table>
+</figure>
 """
 
 cli = typer.Typer(
@@ -89,21 +95,37 @@ class State:
 
 
 @dataclass(order=True, slots=True)
+class Sprint:  # pylint: disable=too-many-instance-attributes
+    """Record Jira sprint information."""
+
+    sort_index: datetime = field(init=False, repr=False)
+    end_date: datetime
+    name: str
+    sprint_id: int
+    start_date: datetime
+    state: str
+
+    def __post_init__(self) -> None:
+        """Set internal fields after __init__."""
+        self.sort_index = self.start_date
+
+
+@dataclass(order=True, slots=True)
 class Ticket:  # pylint: disable=too-many-instance-attributes
     """Record Jira issue information."""
 
     sort_index: datetime = field(init=False, repr=False)
     title: str = field(init=False, repr=False, compare=False)
     week: int = field(init=False, repr=False, compare=False)
+    assignee: str | None
+    created: datetime
     key: str
-    summary: str
-    url: str
-    status: str
     labels: list[str]
     priority: str
-    created: datetime
+    status: str
+    summary: str
     updated: datetime
-    assignee: str | None
+    url: str
 
     def __post_init__(self) -> None:
         """Set internal fields after __init__."""
@@ -134,7 +156,7 @@ def _validate_url(url: str) -> str:
 @cache
 def _last_monday() -> date:
     """Return date of Monday before last..."""
-    today = datetime.now().replace(tzinfo=pytz.utc)
+    today = datetime.now(UTC)
     offset = -1 if today.weekday() == 0 else -2
     return today - relativedelta(weekday=MO(offset))
 
@@ -205,7 +227,7 @@ def main(  # pylint: disable=too-many-arguments
 @cli.command()
 def ls(ctx: typer.Context) -> None:  # pylint: disable=invalid-name
     """List active epics."""
-    epics: list[Ticket] = _query_jira(ctx)
+    sprint, issues = _query_jira(ctx)
 
     table = Table(
         "Key",
@@ -214,25 +236,25 @@ def ls(ctx: typer.Context) -> None:  # pylint: disable=invalid-name
         "Updated",
         box=None,
         header_style="underline2",
-        title=f"Active Epics: {len(epics)}",
+        title=f"Active Issues for '{sprint.name}': {len(issues)}",
         caption="*Updated this week",
         caption_justify="left",
     )
 
-    for epic in epics:
-        if epic.updated >= _last_monday():
+    for issue in issues:
+        if issue.updated >= _last_monday():
             flagged_updated = Styled(
-                epic.updated.strftime("%Y-%m-%d*"), "bold italic"
+                issue.updated.strftime("%Y-%m-%d*"), "bold italic"
             )
         else:
             flagged_updated = Styled(
-                epic.updated.strftime("%Y-%m-%d"), style="dim"
+                issue.updated.strftime("%Y-%m-%d"), style="dim"
             )
 
         table.add_row(
-            Styled(epic.key, style=f"link {epic.url}"),
-            epic.status,
-            epic.summary,
+            Styled(issue.key, style=f"link {issue.url}"),
+            issue.status,
+            issue.summary,
             flagged_updated,
         )
 
@@ -253,35 +275,45 @@ def publish(ctx: typer.Context) -> None:
         typer.echo("Unable to find #jiraActiveEpicsRoot", err=True)
         raise typer.Exit(1) from err
 
-    epics: list[Ticket] = _query_jira(ctx)
+    (sprint, issues) = _query_jira(ctx)
 
     template: Template = Environment(
         trim_blocks=True, lstrip_blocks=True
     ).get_template(Template(JINJA_SOURCE))
 
     epics_root.content = template.render(
-        epics=epics,
+        epics=issues,
         now=datetime.now,
         _last_monday=_last_monday(),
+        sprint=sprint,
     )
 
 
-def _query_jira(ctx: typer.Context) -> list[Ticket]:
-    """Query Jira for active epics."""
-    ocpnode = ctx.obj.jira.boards(name="Node board")
+def _query_jira(ctx: typer.Context) -> Tuple[Sprint, list[Ticket]]:
+    """Query Jira for active issues."""
+    ocpnode = ctx.obj.jira.boards(name="RUN board")
     sprints = ctx.obj.jira.sprints(ocpnode[0].id, state="active")
 
-    start_date = datetime.utcnow().replace(tzinfo=pytz.utc)
+    start_date = datetime.now(UTC)
+    current_sprint = None
     for sprint in sprints:
         date = datetime.fromisoformat(sprint.startDate)
         if date < start_date:
+            current_sprint = Sprint(
+                end_date=datetime.fromisoformat(sprint.endDate),
+                name=sprint.name,
+                sprint_id=sprint.id,
+                start_date=date,
+                state=sprint.state,
+            )
             start_date = date
+    if current_sprint is None:
+        typer.echo("Unable to find current sprint.", err=True)
+        raise typer.Exit(1)
 
     issues: ResultList[Jira.Issue] = ResultList(
         ctx.obj.jira.search_issues(
-            "project = OCPNODE AND status not in (Closed)"
-            f'  AND issueFunction in epicsOf("updated > {start_date.strftime("%Y-%m-%d")}")'
-            "  ORDER BY status ASC, key ASC"
+            f"issueFunction in epicsOf('sprint = {current_sprint.sprint_id}') ORDER BY status ASC, key ASC",
         )
     )
 
@@ -306,7 +338,7 @@ def _query_jira(ctx: typer.Context) -> list[Ticket]:
     tickets: list[Ticket] = []
     for issue in issues:
         tickets.append(_new_ticket(issue))
-    return tickets
+    return (current_sprint, tickets)
 
 
 if __name__ == "__main__":
