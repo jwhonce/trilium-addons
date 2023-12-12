@@ -1,6 +1,6 @@
 /**
  * Clone overdue tasks from previous day(s) to today
- * 
+ *
  * Note(s):
  * 1. As written this script may clone Demo tasks...
  * 2. I use #run=hourly #runAtHour=4 to run my instance of this script daily
@@ -25,7 +25,7 @@ if (!taskTodoRoot?.hasChildren()) {
     return;
 }
 
-const overdueTasks = api.searchForNotes("#task AND #!doneDate AND #todoDate < TODAY",
+const overdueTasks = api.searchForNotes("#task AND #todoDate < TODAY AND #doneDate < TODAY",
     { ancestorNoteId: taskTodoRoot.noteId }
 );
 
